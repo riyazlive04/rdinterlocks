@@ -1,0 +1,10 @@
+{
+  "name": "RD Interlock — Factory OS",
+  "short_name": "RD Interlock",
+  "description": "Daily operations, stock, workers, and cashbook for the brick factory.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAFAF7",
+  "theme_color": "#0E2143",
+  "icons": []
+}

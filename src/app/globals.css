@@ -1,0 +1,66 @@
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --rd-paper: #fafaf7;
+  --rd-paper-2: #f4f1ea;
+  --rd-ink: #0b1220;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--rd-paper);
+  color: var(--rd-ink);
+  font-family: "Geist", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "cv11";
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.display {
+  font-family: "Space Grotesk", "Geist", system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.mono {
+  font-family: "Geist Mono", ui-monospace, monospace;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+/* Soft paper grain */
+.bg-paper-grain {
+  background-color: var(--rd-paper);
+  background-image: radial-gradient(rgba(15, 23, 42, 0.025) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}

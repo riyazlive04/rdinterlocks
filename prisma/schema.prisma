@@ -1,0 +1,511 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Auth ──────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  pinHash   String
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+}
+
+// ─── Master data (admin-managed) ──────────────────────────────────────
+
+model Settings {
+  id              String  @id @default("default")
+  factoryName     String  @default("RD Interlock Bricks")
+  ownerName       String  @default("Admin")
+  address         String  @default("")
+  phone           String  @default("")
+  gstin           String  @default("")
+  cementBagsPer1000 Float @default(18) // recipe ratio, for material reconciliation
+  cashOpening     Float   @default(0)
+  weekStartDay    Int     @default(1) // 0 sun, 1 mon
+  settlementDay   Int     @default(6) // 6 sat
+  // Default piece-rates by shift, used for quick-pick on production entry
+  dayShiftRate    Float   @default(2.5)
+  nightShiftRate  Float   @default(3.0)
+}
+
+model Machine {
+  id     String  @id @default(cuid())
+  name   String  @unique // "Machine A", "Machine B"
+  active Boolean @default(true)
+  order  Int     @default(0)
+
+  productionEntries ProductionEntry[]
+}
+
+// Material recipe per brick size: how many units of each material per 1000 bricks
+model MaterialRecipe {
+  id          String    @id @default(cuid())
+  brickSizeId String
+  brickSize   BrickSize @relation(fields: [brickSizeId], references: [id], onDelete: Cascade)
+  materialId  String
+  material    Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  qtyPer1000  Float
+
+  @@unique([brickSizeId, materialId])
+}
+
+// Current stock level for each material (admin can set + auto-decremented on production)
+model MaterialStock {
+  id         String   @id @default(cuid())
+  materialId String   @unique
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  quantity   Float    @default(0)
+  reorderAt  Float    @default(0) // alert when stock goes below this
+  updatedAt  DateTime @updatedAt
+}
+
+model BrickSize {
+  id    String @id @default(cuid())
+  label String @unique // e.g. "6\"", "6\"H", "8\""
+  order Int    @default(0)
+
+  prices         BrickPrice[]
+  productionEntries ProductionEntry[]
+  stockBatches      StockBatch[]
+  masonWorks        MasonWork[]
+  loadingWorks      LoadingWork[]
+  orderItems        OrderItem[]
+  deliveryItems     DeliveryItem[]
+  tipperLoads       TipperLoad[]
+  recipes           MaterialRecipe[]
+}
+
+model ConstructionType {
+  id    String @id @default(cuid())
+  name  String @unique // Room, Compound, Godown, Foundation, Boundary…
+  order Int    @default(0)
+
+  prices         BrickPrice[]
+  masonWorks     MasonWork[]
+  orderItems     OrderItem[]
+  deliveryItems  DeliveryItem[]
+}
+
+// Pricing matrix: each (size × constructionType) has sellPrice + masonRate
+model BrickPrice {
+  id                 String  @id @default(cuid())
+  brickSizeId        String
+  brickSize          BrickSize        @relation(fields: [brickSizeId], references: [id], onDelete: Cascade)
+  constructionTypeId String
+  constructionType   ConstructionType @relation(fields: [constructionTypeId], references: [id], onDelete: Cascade)
+  sellPrice          Float            // ₹ per brick to client
+  masonRate          Float            // ₹ per brick paid to mason for this combination
+  productionCost     Float    @default(0) // ₹ per brick estimated production cost
+  active             Boolean  @default(true)
+
+  @@unique([brickSizeId, constructionTypeId])
+}
+
+model ExpenseCategory {
+  id    String @id @default(cuid())
+  name  String @unique
+  order Int    @default(0)
+
+  expenses Expense[]
+}
+
+model Material {
+  id    String  @id @default(cuid())
+  name  String  @unique // Cement, Flyash, Powder, Chips, Admixer, Sludge
+  unit  String  @default("bag") // bag, kg, ton, ltr, nos
+  order Int     @default(0)
+
+  recipes MaterialRecipe[]
+  stock   MaterialStock?
+}
+
+// ─── People ────────────────────────────────────────────────────────────
+
+model Operator {
+  id       String   @id @default(cuid())
+  name     String
+  phone    String?
+  joinedAt DateTime @default(now())
+  active   Boolean  @default(true)
+
+  productionShares ProductionShare[]
+  advances         Advance[]
+}
+
+model Mason {
+  id       String   @id @default(cuid())
+  name     String
+  phone    String?
+  joinedAt DateTime @default(now())
+  active   Boolean  @default(true)
+
+  works    MasonWork[]
+  advances Advance[]
+}
+
+model Loader {
+  id       String   @id @default(cuid())
+  name     String
+  phone    String?
+  joinedAt DateTime @default(now())
+  active   Boolean  @default(true)
+
+  works    LoadingWork[]
+  advances Advance[]
+}
+
+model Employee {
+  id        String   @id @default(cuid())
+  name      String
+  role      String   @default("staff") // staff, driver, watchman, etc.
+  payType   String   @default("monthly") // monthly | daily | hourly
+  payRate   Float    @default(0) // ₹ per period
+  phone     String?
+  joinedAt  DateTime @default(now())
+  active    Boolean  @default(true)
+
+  attendance EmployeeAttendance[]
+  advances   Advance[]
+  payouts    EmployeePayout[]
+}
+
+model Vendor {
+  id      String  @id @default(cuid())
+  name    String  @unique // AVM, etc.
+  phone   String?
+  notes   String?
+  active  Boolean @default(true)
+
+  tippers     Tipper[]
+  expenses    Expense[]
+  tipperLoads TipperLoad[]
+}
+
+model Tipper {
+  id        String   @id @default(cuid())
+  name      String   // RD Tipper, AVM Tipper
+  plate     String?
+  ownership String   @default("own") // own | vendor
+  vendorId  String?
+  vendor    Vendor?  @relation(fields: [vendorId], references: [id])
+  emiAmount Float    @default(0) // monthly EMI if own
+  active    Boolean  @default(true)
+
+  loads     TipperLoad[]
+}
+
+model Client {
+  id       String   @id @default(cuid())
+  name     String
+  location String?  // city/town
+  phone    String?
+  notes    String?
+  createdAt DateTime @default(now())
+  active    Boolean  @default(true)
+
+  orders Order[]
+  payments ClientPayment[]
+}
+
+// ─── Operations ────────────────────────────────────────────────────────
+
+// Production = a batch of bricks made by 1+ operators on a date.
+model ProductionEntry {
+  id                 String   @id @default(cuid())
+  date               DateTime
+  shift              String   @default("day") // day | night
+  machineId          String?
+  machine            Machine? @relation(fields: [machineId], references: [id])
+  brickSizeId        String
+  brickSize          BrickSize @relation(fields: [brickSizeId], references: [id])
+  cementBagsUsed     Float    @default(0)
+  brickCount         Int
+  damagedCount       Int      @default(0)
+  ratePerBrick       Float    // operator piece rate (split across operators)
+  totalWage          Float    // brickCount × rate (auto-calculated, frozen on save)
+  notes              String?
+  createdAt          DateTime @default(now())
+
+  shares  ProductionShare[]
+  batch   StockBatch?
+  @@index([date])
+}
+
+model ProductionShare {
+  id                 String  @id @default(cuid())
+  productionEntryId  String
+  productionEntry    ProductionEntry @relation(fields: [productionEntryId], references: [id], onDelete: Cascade)
+  operatorId         String
+  operator           Operator @relation(fields: [operatorId], references: [id])
+  brickCount         Int     @default(0) // share of brickCount (rounded so sum equals total)
+  amount             Float   // share of totalWage (rounded so sum equals total)
+}
+
+model StockBatch {
+  id                String   @id @default(cuid())
+  code              String   @unique // B-001
+  brickSizeId       String
+  brickSize         BrickSize @relation(fields: [brickSizeId], references: [id])
+  productionEntryId String?  @unique
+  productionEntry   ProductionEntry? @relation(fields: [productionEntryId], references: [id])
+  count             Int
+  remaining         Int
+  stage             String   @default("produced") // produced | drying | curing | ready | dispatched
+  producedAt        DateTime @default(now())
+  stageChangedAt    DateTime @default(now())
+
+  @@index([stage])
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  date        DateTime        @default(now())
+  categoryId  String
+  category    ExpenseCategory @relation(fields: [categoryId], references: [id])
+  title       String
+  amount      Float
+  notes       String?
+  vendorId    String?
+  vendor      Vendor?         @relation(fields: [vendorId], references: [id])
+  tipperId    String?         // expenses tagged to a tipper (diesel, oil, EMI, etc.)
+  cashEntryId String?         @unique
+  cashEntry   CashEntry?      @relation(fields: [cashEntryId], references: [id])
+
+  @@index([date])
+}
+
+// Tipper loads = either income (delivering bricks/RM for a fee) OR
+// an internal use record (own RD tipper carrying our own bricks — no income).
+model TipperLoad {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  tipperId    String
+  tipper      Tipper   @relation(fields: [tipperId], references: [id])
+  vendorId    String?  // if vendor-owned
+  vendor      Vendor?  @relation(fields: [vendorId], references: [id])
+  loadType    String   // bricks | material
+  brickSizeId String?
+  brickSize   BrickSize? @relation(fields: [brickSizeId], references: [id])
+  materialName String? // when loadType=material
+  quantity    Float
+  unit        String   @default("pcs")
+  fromLocation String?
+  toLocation   String?
+  rentAmount   Float    @default(0) // earned (or paid if vendor)
+  rentDirection String  @default("in") // in (we earn) | out (we pay vendor)
+  notes        String?
+  cashEntryId  String?  @unique
+  cashEntry    CashEntry? @relation(fields: [cashEntryId], references: [id])
+
+  @@index([date])
+}
+
+model MasonWork {
+  id                String   @id @default(cuid())
+  date              DateTime @default(now())
+  masonId           String
+  mason             Mason    @relation(fields: [masonId], references: [id])
+  siteName          String
+  brickSizeId       String
+  brickSize         BrickSize @relation(fields: [brickSizeId], references: [id])
+  constructionTypeId String
+  constructionType  ConstructionType @relation(fields: [constructionTypeId], references: [id])
+  brickCount        Int
+  ratePerBrick      Float
+  totalAmount       Float
+  notes             String?
+
+  @@index([date])
+}
+
+model LoadingWork {
+  id           String   @id @default(cuid())
+  date         DateTime @default(now())
+  loaderId     String
+  loader       Loader   @relation(fields: [loaderId], references: [id])
+  brickSizeId  String?
+  brickSize    BrickSize? @relation(fields: [brickSizeId], references: [id])
+  brickCount   Int
+  ratePerBrick Float
+  totalAmount  Float
+  notes        String?
+
+  @@index([date])
+}
+
+// ─── Sales: Order → Deliveries → Payments ─────────────────────────────
+
+model Order {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  date        DateTime @default(now())
+  expectedDeliveryDate DateTime?
+  status      String   @default("open") // open | partial | complete | cancelled
+  notes       String?
+
+  items     OrderItem[]
+  deliveries Delivery[]
+  payments   ClientPayment[]
+}
+
+model OrderItem {
+  id                 String   @id @default(cuid())
+  orderId            String
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  brickSizeId        String
+  brickSize          BrickSize @relation(fields: [brickSizeId], references: [id])
+  constructionTypeId String
+  constructionType   ConstructionType @relation(fields: [constructionTypeId], references: [id])
+  quantity           Int
+  pricePerBrick      Float
+  total              Float
+}
+
+model Delivery {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date         DateTime @default(now())
+  vehicleId    String?  // optional Tipper used
+  truckPlate   String?
+  notes        String?
+
+  items     DeliveryItem[]
+  addOns    DeliveryAddOn[]
+  returns   DeliveryReturn[]
+
+  @@index([date])
+}
+
+model DeliveryItem {
+  id                 String   @id @default(cuid())
+  deliveryId         String
+  delivery           Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  brickSizeId        String
+  brickSize          BrickSize @relation(fields: [brickSizeId], references: [id])
+  constructionTypeId String
+  constructionType   ConstructionType @relation(fields: [constructionTypeId], references: [id])
+  quantity           Int
+  pricePerBrick      Float
+  total              Float
+}
+
+model DeliveryAddOn {
+  id          String   @id @default(cuid())
+  deliveryId  String
+  delivery    Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  name        String   // Cement, Lintel slab, Loading charges, etc.
+  quantity    Float
+  unit        String   @default("unit")
+  pricePerUnit Float
+  total       Float
+}
+
+model DeliveryReturn {
+  id          String   @id @default(cuid())
+  deliveryId  String
+  delivery    Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  brickCount  Int
+  refundAmount Float
+  notes       String?
+}
+
+model ClientPayment {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id])
+  date      DateTime @default(now())
+  amount    Float
+  method    String   @default("cash") // cash | gpay | bank | upi | cheque
+  notes     String?
+  cashEntryId String? @unique
+  cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
+}
+
+// ─── Employees: attendance + salary + advance ─────────────────────────
+
+model EmployeeAttendance {
+  id         String   @id @default(cuid())
+  date       DateTime
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  status     String   // present | absent | leave | half
+
+  @@unique([date, employeeId])
+}
+
+model EmployeePayout {
+  id         String   @id @default(cuid())
+  date       DateTime @default(now())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  periodStart DateTime
+  periodEnd   DateTime
+  baseAmount  Float
+  bonus       Float    @default(0)
+  deductions  Float    @default(0)
+  advancesSettled Float @default(0)
+  netPaid     Float
+  notes       String?
+  cashEntryId String?  @unique
+  cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
+}
+
+// ─── Generic Advance (any person type) ────────────────────────────────
+
+model Advance {
+  id        String   @id @default(cuid())
+  date      DateTime @default(now())
+  personType String  // operator | mason | loader | employee
+  operatorId String?
+  operator   Operator? @relation(fields: [operatorId], references: [id])
+  masonId    String?
+  mason      Mason?   @relation(fields: [masonId], references: [id])
+  loaderId   String?
+  loader     Loader?  @relation(fields: [loaderId], references: [id])
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+  amount     Float
+  notes      String?
+  settled    Boolean  @default(false)
+  cashEntryId String? @unique
+  cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
+
+  @@index([date])
+}
+
+// ─── Unified Cashbook ─────────────────────────────────────────────────
+
+// One row per real cash movement. Auto-created from operations
+// (Expense, ClientPayment, EmployeePayout, Advance, TipperLoad with rent).
+// Direct rows can also be added by admin (sundry receipt/payment).
+model CashEntry {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  amount      Float
+  direction   String   // in | out
+  source      String   @default("manual") // manual | expense | sale | wage | advance | tipper
+  category    String
+  title       String
+  notes       String?
+  method      String   @default("cash") // cash | gpay | bank | upi | cheque
+
+  expense       Expense?
+  tipperLoad    TipperLoad?
+  advance       Advance?
+  clientPayment ClientPayment?
+  employeePayout EmployeePayout?
+
+  @@index([date])
+}

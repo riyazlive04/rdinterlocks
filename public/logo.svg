@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <pattern id="brick" width="20" height="10" patternUnits="userSpaceOnUse">
+      <rect width="20" height="10" fill="#3a3a3a"/>
+      <path d="M0 5 L20 5 M10 0 L10 5 M0 10 L20 10 M5 5 L5 10 M15 5 L15 10" stroke="#2a2a2a" stroke-width="0.6"/>
+    </pattern>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a4a4a"/>
+      <stop offset="1" stop-color="#1a1a1a"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="100" fill="url(#g)"/>
+  <circle cx="100" cy="100" r="100" fill="url(#brick)" opacity="0.85"/>
+  <g transform="translate(100 95) scale(1)" text-anchor="middle" font-family="'Arial Black','Helvetica Neue',sans-serif" font-weight="900">
+    <text x="-22" y="10" font-size="68" fill="#E11D2C">R</text>
+    <text x="22" y="10" font-size="68" fill="#1F4FFF">D</text>
+    <path d="M-44 -22 L-22 -38 L0 -22 L0 -10 L-44 -10 Z" fill="none" stroke="#E11D2C" stroke-width="3"/>
+    <rect x="-30" y="-18" width="6" height="6" fill="none" stroke="#E11D2C" stroke-width="1.5"/>
+    <path d="M22 -10 L33 -22 L44 -10 L44 8 L22 8 Z" fill="none" stroke="#1F4FFF" stroke-width="3"/>
+  </g>
+  <text x="100" y="148" text-anchor="middle" font-family="'Arial Black','Helvetica Neue',sans-serif" font-weight="900" font-size="18" fill="#fff" letter-spacing="3">INTERLOCK</text>
+  <text x="100" y="170" text-anchor="middle" font-family="'Arial Black','Helvetica Neue',sans-serif" font-weight="800" font-size="14" fill="#fff" letter-spacing="6">BRICKS</text>
+</svg>

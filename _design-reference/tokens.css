@@ -1,0 +1,93 @@
+/* RD Interlock — Design Tokens
+   Inspired by industrial dashboards: deep navy, terra-orange accents, slate neutrals, soft whites.
+   System type: Geist (technical) for UI; Space Grotesk for display.
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  /* Core palette */
+  --rd-ink: #0B1220;          /* near-black ink */
+  --rd-navy-900: #0E2143;     /* deep brand navy */
+  --rd-navy-800: #14305E;
+  --rd-navy-700: #1B3F7A;
+  --rd-navy-600: #2659A0;
+  --rd-navy-500: #3B73C4;
+  --rd-navy-50:  #EEF3FB;
+
+  --rd-orange-700: #B8470E;
+  --rd-orange-600: #DA5715;
+  --rd-orange-500: #F26A1F;   /* primary industrial orange */
+  --rd-orange-400: #FB8A3D;
+  --rd-orange-100: #FFE7D4;
+  --rd-orange-50:  #FFF3E8;
+
+  --rd-slate-900: #0F172A;
+  --rd-slate-800: #1E293B;
+  --rd-slate-700: #334155;
+  --rd-slate-600: #475569;
+  --rd-slate-500: #64748B;
+  --rd-slate-400: #94A3B8;
+  --rd-slate-300: #CBD5E1;
+  --rd-slate-200: #E2E8F0;
+  --rd-slate-100: #F1F5F9;
+  --rd-slate-50:  #F8FAFC;
+
+  --rd-paper: #FAFAF7;        /* soft white */
+  --rd-paper-2: #F4F1EA;      /* warm off-white */
+  --rd-card: #FFFFFF;
+
+  /* Stock pipeline stages */
+  --rd-stage-produced: #F26A1F;
+  --rd-stage-drying:   #C97A18;
+  --rd-stage-curing:   #1F8FB3;
+  --rd-stage-ready:    #2F8F5A;
+  --rd-stage-dispatched: #6B7280;
+
+  /* Semantic */
+  --rd-success: #10B981;
+  --rd-warning: #F59E0B;
+  --rd-danger:  #DC2626;
+  --rd-info:    #2563EB;
+
+  /* Type */
+  --rd-font-ui: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --rd-font-display: 'Space Grotesk', 'Geist', system-ui, sans-serif;
+  --rd-font-mono: 'Geist Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-2xl: 28px;
+  --r-pill: 999px;
+
+  /* Shadows */
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .04);
+  --shadow-2: 0 4px 12px rgba(15, 23, 42, .07), 0 2px 4px rgba(15, 23, 42, .04);
+  --shadow-3: 0 12px 32px rgba(15, 23, 42, .10), 0 4px 10px rgba(15, 23, 42, .05);
+  --shadow-orange: 0 8px 24px rgba(242, 106, 31, .35);
+  --shadow-navy:   0 8px 24px rgba(14, 33, 67, .25);
+}
+
+/* Base resets / utilities used inside artboards */
+.rd {
+  font-family: var(--rd-font-ui);
+  color: var(--rd-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "cv11";
+}
+.rd * { box-sizing: border-box; }
+.rd .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.rd .display { font-family: var(--rd-font-display); letter-spacing: -0.02em; }
+.rd .mono { font-family: var(--rd-font-mono); }
+
+/* Subtle grain for paper feel */
+.rd-paper-bg {
+  background-color: var(--rd-paper);
+  background-image:
+    radial-gradient(rgba(15,23,42,0.025) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
