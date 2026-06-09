@@ -18,7 +18,7 @@ const kinds: Array<{ k: ReportKind | "summary"; label: string }> = [
   { k: "tipper", label: "Tipper" },
   { k: "mason", label: "Mason" },
   { k: "loading", label: "Loading" },
-  { k: "wages", label: "Wages" },
+  { k: "wages", label: "Salary" },
   { k: "cashbook", label: "Cashbook" },
 ];
 
@@ -333,7 +333,7 @@ async function SummarySection({ from, to }: { from: Date; to: Date }) {
         {/* Expense split */}
         <Card>
           <div className="text-base font-bold text-ink mb-3">Expense breakdown</div>
-          <Row label="Labour & Wages" amount={s.expense.labour} total={s.expense.total} color="#E11D2C" />
+          <Row label="Labour & Salary" amount={s.expense.labour} total={s.expense.total} color="#E11D2C" />
           <Row label="Materials" amount={s.expense.materials} total={s.expense.total} color="#F59E0B" />
           <Row label="Transport ops" amount={s.expense.transport} total={s.expense.total} color="#1F4FFF" />
           <Row label="Other" amount={s.expense.other} total={s.expense.total} color="#64748B" />

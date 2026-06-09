@@ -134,7 +134,7 @@ export default async function VehiclesPage({
               </div>
             </div>
             <Link
-              href="/expense/new"
+              href="/expense/new?category=EMI"
               className="text-xs font-semibold text-brand-blue"
             >
               + Pay EMI
@@ -188,6 +188,14 @@ export default async function VehiclesPage({
                           {status}
                         </Pill>
                       </div>
+                      <Link
+                        href={`/expense/new?category=EMI&tipper=${t.id}&amount=${t.emiAmount}&title=${encodeURIComponent(
+                          `EMI - ${t.name}`
+                        )}`}
+                        className="ml-1 px-2.5 py-1.5 rounded-lg bg-brand-blue text-white text-[11px] font-semibold whitespace-nowrap"
+                      >
+                        Pay
+                      </Link>
                     </div>
                   );
                 })}

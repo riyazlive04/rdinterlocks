@@ -46,7 +46,7 @@ export default async function ProductionPage({
     <>
       <PageHeader
         title="Daily Production"
-        sub="Each entry creates one stock batch + splits the wage among operators"
+        sub="Each entry creates one stock batch + splits the salary among operators"
         right={
           <Link
             href="/production/new"
@@ -72,7 +72,7 @@ export default async function ProductionPage({
         </Card>
         <Card padding="tight">
           <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-            Operator wages
+            Operator salary
           </div>
           <div className="num display text-xl font-bold mt-0.5">{formatINR(totals.wage)}</div>
         </Card>
@@ -108,7 +108,7 @@ export default async function ProductionPage({
                   <Th align="right">Damaged</Th>
                   <Th align="right">Cement</Th>
                   <Th>Operators</Th>
-                  <Th align="right">Wage</Th>
+                  <Th align="right">Salary</Th>
                   <Th>Batch</Th>
                   <Th align="right">Action</Th>
                 </tr>

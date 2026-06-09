@@ -179,7 +179,7 @@ export default async function PayrollPage({
 
   return (
     <>
-      <PageHeader title="Payroll" sub="Everyone's wages & salary for the month, in one place" />
+      <PageHeader title="Payroll" sub="Everyone's salary for the month, in one place" />
 
       <PayrollAdvanceForm
         groups={advanceGroups}
@@ -295,8 +295,8 @@ export default async function PayrollPage({
       </div>
 
       <div className="text-[11px] text-slate-500 mt-4">
-        Net payable = earned − open advances − already paid this month. Operator wages come from
-        production splits; mason/loader from their work logs; employee salary from pay type &
+        Net payable = earned − open advances − already paid this month. Operator salary comes from
+        production splits; mason/loader from their work logs; employee pay from pay type &
         attendance. Record actual payments from each person&apos;s page so the cash book stays in sync.
       </div>
     </>

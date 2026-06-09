@@ -99,7 +99,7 @@ export default async function CashbookPage({
           { k: "sale", label: "Sales", direction: null, source: "sale" },
           { k: "advance", label: "Advance", direction: null, source: "advance" },
           { k: "tipper", label: "Tipper", direction: null, source: "tipper" },
-          { k: "wage", label: "Wage", direction: null, source: "wage" },
+          { k: "wage", label: "Salary", direction: null, source: "wage" },
         ].map((t) => {
           const url = new URLSearchParams();
           if (t.direction) url.set("direction", t.direction);

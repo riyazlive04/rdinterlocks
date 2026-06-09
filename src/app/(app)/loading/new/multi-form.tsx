@@ -154,7 +154,7 @@ export function LoadingMultiForm({
               <tr className="text-slate-500 text-[10px] uppercase tracking-wider">
                 <th className="text-left px-3 py-2">Worker</th>
                 <th className="text-right px-3 py-2">Bricks</th>
-                <th className="text-right px-3 py-2">Wage</th>
+                <th className="text-right px-3 py-2">Salary</th>
               </tr>
             </thead>
             <tbody>

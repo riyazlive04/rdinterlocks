@@ -48,7 +48,7 @@ export default async function LoadingPage({
     <>
       <PageHeader
         title="Loading work"
-        sub="Loading wages - paid by piece rate"
+        sub="Loading salary - paid by piece rate"
         right={
           <Link
             href="/loading/new"
@@ -70,7 +70,7 @@ export default async function LoadingPage({
         </Card>
         <Card padding="tight">
           <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-            Loading wages
+            Loading salary
           </div>
           <div className="num display text-xl font-bold mt-0.5 text-brand-red">
             {formatINR(works.reduce((s, w) => s + w.totalAmount, 0))}

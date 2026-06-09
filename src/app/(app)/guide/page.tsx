@@ -19,31 +19,21 @@ const quickRef: Array<{
     ],
   },
   {
-    action: "Client payment",
+    action: "Fast day sheet",
+    enter: "Day → add size rows",
+    enterHref: "/day",
+    output: [
+      { label: "Production list", href: "/production" },
+      { label: "Dashboard", href: "/" },
+    ],
+  },
+  {
+    action: "Client payment / advance",
     enter: "Client page → Record payment",
     enterHref: "/clients",
     output: [
       { label: "Cashbook", href: "/cash" },
-      { label: "Reports → Cashbook", href: "/reports?kind=cashbook" },
       { label: "Client detail", href: "/clients" },
-    ],
-  },
-  {
-    action: "Worker advance",
-    enter: "Employee detail → Give advance",
-    enterHref: "/employees",
-    output: [
-      { label: "Cashbook", href: "/cash" },
-      { label: "Reports → Wages", href: "/reports?kind=wages" },
-    ],
-  },
-  {
-    action: "Salary payout",
-    enter: "Employee detail → Salary payout",
-    enterHref: "/employees",
-    output: [
-      { label: "Cashbook", href: "/cash" },
-      { label: "Reports → Wages", href: "/reports?kind=wages" },
     ],
   },
   {
@@ -52,7 +42,7 @@ const quickRef: Array<{
     enterHref: "/clients",
     output: [
       { label: "Client detail", href: "/clients" },
-      { label: "Dashboard pending orders", href: "/" },
+      { label: "Dashboard orders", href: "/" },
     ],
   },
   {
@@ -60,19 +50,16 @@ const quickRef: Array<{
     enter: "Order → Add delivery",
     enterHref: "/clients",
     output: [
+      { label: "Deliveries log", href: "/deliveries" },
       { label: "Reports → Sales", href: "/reports?kind=sales" },
       { label: "Cashbook", href: "/cash" },
     ],
   },
   {
-    action: "Tipper trip",
-    enter: "Tipper → New load",
-    enterHref: "/tipper/new",
-    output: [
-      { label: "Tipper list", href: "/tipper" },
-      { label: "Reports → Tipper", href: "/reports?kind=tipper" },
-      { label: "Cashbook (if rent)", href: "/cash" },
-    ],
+    action: "Evening delivery check",
+    enter: "Deliveries → mark done",
+    enterHref: "/deliveries",
+    output: [{ label: "Deliveries log", href: "/deliveries" }],
   },
   {
     action: "Mason work",
@@ -93,21 +80,58 @@ const quickRef: Array<{
     ],
   },
   {
+    action: "Worker advance",
+    enter: "Payroll → Record advance",
+    enterHref: "/payroll",
+    output: [
+      { label: "Cashbook", href: "/cash" },
+      { label: "Payroll", href: "/payroll" },
+    ],
+  },
+  {
+    action: "Pay salary / settle",
+    enter: "Payroll → Settle",
+    enterHref: "/payroll",
+    output: [
+      { label: "Cashbook", href: "/cash" },
+      { label: "Reports → Salary", href: "/reports?kind=wages" },
+      { label: "Payroll", href: "/payroll" },
+    ],
+  },
+  {
+    action: "Tipper trip",
+    enter: "Tipper → New load",
+    enterHref: "/tipper/new",
+    output: [
+      { label: "Tipper list", href: "/tipper" },
+      { label: "Reports → Tipper", href: "/reports?kind=tipper" },
+      { label: "Cashbook (if rent)", href: "/cash" },
+    ],
+  },
+  {
     action: "Expense",
     enter: "Expense → New expense",
     enterHref: "/expense/new",
     output: [
       { label: "Cashbook", href: "/cash" },
       { label: "Reports → Expense", href: "/reports?kind=expense" },
-      { label: "Reports → Summary", href: "/reports?kind=summary" },
+    ],
+  },
+  {
+    action: "Pay EMI",
+    enter: "Vehicles → Pay EMI",
+    enterHref: "/vehicles",
+    output: [
+      { label: "Cashbook", href: "/cash" },
+      { label: "Vehicles → EMI", href: "/vehicles" },
     ],
   },
   {
     action: "Brick return",
-    enter: "Order → Add delivery → Returns section",
+    enter: "Order → Add delivery → Returns",
     enterHref: "/clients",
     output: [
-      { label: "Reports → Sales (inline)", href: "/reports?kind=sales" },
+      { label: "Reports → Sales", href: "/reports?kind=sales" },
       { label: "Client detail", href: "/clients" },
     ],
   },
@@ -116,6 +140,12 @@ const quickRef: Array<{
     enter: "Employee detail → Mark attendance",
     enterHref: "/employees",
     output: [{ label: "Employee history", href: "/employees" }],
+  },
+  {
+    action: "Add a login",
+    enter: "Settings → Users & access",
+    enterHref: "/settings/users",
+    output: [{ label: "Users & access", href: "/settings/users" }],
   },
 ];
 
@@ -130,20 +160,21 @@ const sections: Array<{
     items: [
       {
         title: "Quick action grid",
-        body: "Six tap targets for the most common tasks. Tap Production to start an entry, Sale to go to clients, etc.",
+        body: "Tap targets for the most common tasks - Production, Sale, Expense and more.",
       },
       {
         title: "Smart alerts",
-        body: "Auto-generated warnings: low raw material stock, overdue dispatches, open advances.",
+        body: "Auto warnings: low raw material stock, overdue deliveries, open advances not yet settled.",
         link: "/",
       },
       {
-        title: "7-day production chart",
-        body: "Bricks produced each day for the past week, latest day highlighted in red.",
+        title: "Stock pipeline",
+        body: "Live counts per stage: Produced → Drying → Curing → Ready. Batches move stage automatically by age.",
+        link: "/",
       },
       {
-        title: "Stock pipeline",
-        body: "Live counts of bricks in each stage: Produced → Drying → Curing → Ready.",
+        title: "Revenue is role-based",
+        body: "Cash, profit and revenue figures only show for admins. A manager without the Revenue area won't see them.",
       },
     ],
   },
@@ -152,36 +183,38 @@ const sections: Array<{
     icon: "Brick",
     items: [
       {
-        title: "Shift + machine + size",
-        body: "Pick day or night shift (rate auto-fills), assign a machine, choose brick size. The recipe shows how much cement / fly ash / powder will be deducted from stock.",
+        title: "Single entry",
+        body: "Shift (rate auto-fills), machine, brick size. The recipe shows the material deducted from stock. You can log several entries for one machine on the same day.",
+        link: "/production/new",
       },
       {
-        title: "Damaged bricks",
-        body: "Track damaged separately so good count is clear. Damaged still create a stock batch but show in red on the list.",
+        title: "Fast day sheet",
+        body: "One date / shift / operator set with many brick-size rows - each row becomes its own stock batch and salary split.",
+        link: "/day",
       },
       {
-        title: "Multi-operator wage split",
-        body: "Pick all operators on the line - total wage divides equally.",
+        title: "Multi-operator salary split",
+        body: "Pick all operators on the line - the total salary divides equally.",
+      },
+      {
+        title: "Per-size day & night rate",
+        body: "Set a day and night piece-rate per brick size in Settings → Brick sizes; production auto-fills it.",
+        link: "/settings/brick-sizes",
       },
     ],
   },
   {
-    group: "Reports",
-    icon: "Chart",
+    group: "Stock pipeline",
+    icon: "Box",
     items: [
       {
-        title: "Diary-style ledger",
-        body: "Each report shows entries grouped by date with sub-totals per day and a grand total at the bottom - same layout the owner uses in his diary.",
-        link: "/reports",
+        title: "Auto staging by age",
+        body: "Each batch advances Produced → Drying → Curing → Ready based on the number of days since it was produced.",
       },
       {
-        title: "Summary tab (P&L)",
-        body: "Net Profit hero number, income/expense breakdown, top expense categories, staff payment status, and Transport business as a separate P&L.",
-        link: "/reports?kind=summary",
-      },
-      {
-        title: "Excel and PDF export",
-        body: "Every diary view exports to Excel (with formulas) or PDF (with brand letterhead). Buttons live top-right.",
+        title: "Set drying & curing days",
+        body: "Choose how many days each stage lasts in Settings → Factory; the pipeline counts update accordingly.",
+        link: "/settings/factory",
       },
     ],
   },
@@ -191,17 +224,67 @@ const sections: Array<{
     items: [
       {
         title: "Order → Delivery → Payment",
-        body: "An order can have multiple deliveries. Each delivery can include add-on products (cement, lintel) and returns. Balance updates automatically.",
+        body: "An order can have multiple deliveries, each with add-on products (cement, lintel) and returns. The balance updates automatically.",
         link: "/clients",
       },
       {
-        title: "Inline returns",
-        body: "Returns appear in the Sales report under their parent delivery - tracking exactly how the diary records them.",
+        title: "Add a client inline (with advance)",
+        body: "Create a new client while taking an order and record an opening advance at the same time.",
+        link: "/clients/new",
+      },
+      {
+        title: "Deliveries log",
+        body: "A date-sorted list of deliveries for the evening check - tap to mark a delivery done.",
+        link: "/deliveries",
       },
     ],
   },
   {
-    group: "Tipper & Vendors",
+    group: "Reports",
+    icon: "Chart",
+    items: [
+      {
+        title: "Diary-style ledger",
+        body: "Each report groups entries by date with daily sub-totals and a grand total - the same layout the owner uses in his diary.",
+        link: "/reports",
+      },
+      {
+        title: "Summary (P&L)",
+        body: "Net profit, income/expense breakdown, staff payment status and a separate transport P&L. Hidden for users without Revenue access.",
+        link: "/reports?kind=summary",
+      },
+      {
+        title: "Excel & PDF export",
+        body: "Every diary view exports to Excel (with formulas) or branded PDF. Buttons live top-right.",
+      },
+    ],
+  },
+  {
+    group: "Salary & Advances",
+    icon: "Workers",
+    items: [
+      {
+        title: "Payroll in one place",
+        body: "Everyone's earned, advances, paid and net payable for the month - operators, masons, loaders and employees together.",
+        link: "/payroll",
+      },
+      {
+        title: "Record advance (any worker)",
+        body: "Payroll → Record advance works for operators, masons, loaders and employees. It posts a cash-out and shows under that person.",
+      },
+      {
+        title: "Settle / pay salary",
+        body: "Payroll → Settle pays the net wage, deducts (settles) open advances and posts the cash-out. Net payable then reads zero.",
+      },
+      {
+        title: "Mason / Loader rates",
+        body: "Mason rate per brick comes from the Price matrix (size × construction type); loader is piece-rate per brick.",
+        link: "/settings/price-matrix",
+      },
+    ],
+  },
+  {
+    group: "Tipper & Vehicles",
     icon: "Truck",
     items: [
       {
@@ -211,38 +294,43 @@ const sections: Array<{
       },
       {
         title: "EMI tracking",
-        body: "Set monthly EMI on a tipper in Settings → Tippers. Pay an EMI as an Expense with category EMI.",
+        body: "Set the monthly EMI in Settings → Tippers. On Vehicles → EMI, tap Pay - the vehicle, amount and title are pre-filled into a new expense.",
+        link: "/vehicles",
       },
     ],
   },
   {
-    group: "Wages & Advances",
-    icon: "Workers",
+    group: "Cashbook",
+    icon: "Tag",
     items: [
       {
-        title: "Operator advance",
-        body: "Recorded against an operator. When the next salary is paid, mark advances as settled.",
+        title: "One source of truth",
+        body: "Every money movement - sales, expenses, advances, salary, tipper rent and EMI - posts here automatically. Cash in hand is always live.",
+        link: "/cash",
       },
       {
-        title: "Mason / Loader rates",
-        body: "Mason rate per brick comes from the Price matrix (size × construction type). Loader is piece-rate per brick.",
-        link: "/settings/price-matrix",
+        title: "Pick a date range",
+        body: "Today / This week / This month / All, or a custom range - plus filters by type (Salary, Advance, Expense, Sales…).",
       },
     ],
   },
   {
-    group: "Settings",
+    group: "Settings & Access",
     icon: "Settings",
     items: [
       {
         title: "Master data lives here",
-        body: "Brick sizes, construction types, price matrix, expense categories, materials, recipes, vendors, tippers, operators, masons, loaders, employees.",
+        body: "Brick sizes & rates, construction types, price matrix, expense categories, materials, recipes, vendors, tippers, operators, masons, loaders, employees.",
         link: "/settings",
       },
       {
-        title: "Material recipe",
-        body: "Per 1000 bricks of each size, set how much of each material is consumed. Production decrements stock automatically.",
-        link: "/settings/materials",
+        title: "Users & access",
+        body: "Create logins and choose which areas each user can see. Leave Revenue off to hide all money totals from a manager.",
+        link: "/settings/users",
+      },
+      {
+        title: "Signing in",
+        body: "Each person signs in with their own username + password. Set or change passwords under Users & access.",
       },
     ],
   },

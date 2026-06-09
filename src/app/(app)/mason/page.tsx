@@ -66,7 +66,7 @@ export default async function MasonPage({
         </Card>
         <Card padding="tight">
           <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-            Wages owed
+            Salary owed
           </div>
           <div className="num display text-xl font-bold mt-0.5 text-brand-red">
             {formatINR(totalEarned)}

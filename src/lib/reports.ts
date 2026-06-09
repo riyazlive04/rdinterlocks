@@ -167,7 +167,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           { key: "bricks", header: "Bricks", format: "number", align: "right" },
           { key: "cement", header: "Cement", format: "number", align: "right" },
           { key: "rate", header: "Rate", format: "muted", align: "right", width: "60px" },
-          { key: "wage", header: "Wage", format: "money", align: "right" },
+          { key: "wage", header: "Salary", format: "money", align: "right" },
           { key: "operators", header: "Operators" },
         ],
         sections,
@@ -450,7 +450,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         numberKeys
       );
       return {
-        title: "Loading wages",
+        title: "Loading salary",
         unit: "entries",
         moneyKeys,
         numberKeys,
@@ -525,7 +525,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         moneyKeys
       );
       return {
-        title: "Wages & advances",
+        title: "Salary & advances",
         unit: "entries",
         moneyKeys,
         columns: [

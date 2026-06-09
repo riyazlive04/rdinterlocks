@@ -18,20 +18,28 @@ export function ExpenseForm({
   categories,
   vendors,
   tippers,
+  initial,
   onSubmit,
 }: {
   categories: Array<{ id: string; name: string }>;
   vendors: Array<{ id: string; name: string }>;
   tippers: Array<{ id: string; name: string }>;
+  initial?: {
+    categoryId?: string;
+    title?: string;
+    amount?: number;
+    tipperId?: string;
+    notes?: string;
+  };
   onSubmit: (d: Sub) => Promise<void>;
 }) {
   const [date, setDate] = useState(formatISODate(new Date()));
-  const [categoryId, setCategoryId] = useState(categories[0]?.id ?? "");
-  const [title, setTitle] = useState("");
-  const [amount, setAmount] = useState<number | "">("");
-  const [notes, setNotes] = useState("");
+  const [categoryId, setCategoryId] = useState(initial?.categoryId ?? categories[0]?.id ?? "");
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [amount, setAmount] = useState<number | "">(initial?.amount ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [vendorId, setVendorId] = useState("");
-  const [tipperId, setTipperId] = useState("");
+  const [tipperId, setTipperId] = useState(initial?.tipperId ?? "");
   const [method, setMethod] = useState<"cash" | "gpay" | "bank" | "upi" | "cheque">("cash");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();

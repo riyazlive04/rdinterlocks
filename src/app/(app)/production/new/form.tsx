@@ -238,7 +238,7 @@ export function ProductionForm({
           </Field>
           <Field
             label="Damaged bricks (tracked separately)"
-            hint="Recorded for waste tracking - does not reduce production count or wage."
+            hint="Recorded for waste tracking - does not reduce production count or salary."
           >
             <Input
               type="number"
@@ -340,7 +340,7 @@ export function ProductionForm({
         <div className="grid grid-cols-3 gap-3 mb-3">
           <Stat label="Production" value={formatNumber(brickCount)} />
           <Stat label="Damaged" value={formatNumber(damagedCount)} color="text-brand-red" />
-          <Stat label="Total wage" value={formatINR(totals.total)} />
+          <Stat label="Total salary" value={formatINR(totals.total)} />
         </div>
         {operatorList.length > 0 && (
           <>
@@ -353,7 +353,7 @@ export function ProductionForm({
                   <tr className="text-slate-500 text-[10px] uppercase tracking-wider">
                     <th className="text-left px-3 py-2">Operator</th>
                     <th className="text-right px-3 py-2">Bricks</th>
-                    <th className="text-right px-3 py-2">Wage</th>
+                    <th className="text-right px-3 py-2">Salary</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -395,7 +395,7 @@ export function ProductionForm({
           <div className="text-[12px] text-slate-500 hidden sm:block">
             {brickCount > 0 ? (
               <>
-                {formatNumber(brickCount)} bricks · {formatINR(totals.total)} wage
+                {formatNumber(brickCount)} bricks · {formatINR(totals.total)} salary
               </>
             ) : (
               "Enter a count"

@@ -172,7 +172,7 @@ export function DaySheet({
         </div>
         <div className="mt-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-            Operators (wage split) · {selected.size} selected
+            Operators (salary split) · {selected.size} selected
           </div>
           <div className="flex flex-wrap gap-2">
             {operators.map((o) => {
@@ -287,7 +287,7 @@ export function DaySheet({
         <div className="max-w-screen-xl mx-auto flex items-center justify-between gap-3">
           <div className="text-[12px] text-slate-600 hidden sm:block">
             {rows.length} {rows.length === 1 ? "batch" : "batches"} · {formatNumber(totals.bricks)} bricks ·{" "}
-            {totals.cement.toFixed(1)} cement · {formatINR(totals.wage)} wage
+            {totals.cement.toFixed(1)} cement · {formatINR(totals.wage)} salary
           </div>
           <Button onClick={submit} disabled={isPending} variant="primary" size="lg" className="ml-auto">
             {isPending ? "Saving…" : `Save ${rows.length} ${rows.length === 1 ? "entry" : "entries"}`}
