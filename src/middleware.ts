@@ -4,8 +4,9 @@ import { jwtVerify } from "jose";
 
 // Edge middleware: validate the session cookie on EVERY app request in one
 // place, so auth behaves consistently (no "looks logged in but isn't" state).
-// If the cookie is missing or can't be verified, redirect to /login AND clear
-// the bad cookie so the next login starts clean.
+// If the cookie is missing or can't be verified, redirect to /login. We do NOT
+// clear the cookie on redirect — see the note below for why that caused
+// spurious logouts.
 
 const COOKIE_NAME = "rd_session";
 const ALGO = "HS256";
@@ -47,10 +48,11 @@ export async function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
   url.pathname = "/login";
   url.search = "";
-  const res = NextResponse.redirect(url);
-  // Clear the invalid cookie so re-login is clean.
-  if (token) res.cookies.delete(COOKIE_NAME);
-  return res;
+  // IMPORTANT: do NOT delete the cookie here. Next.js fires background RSC
+  // prefetch requests; if one transiently fails validation, deleting the
+  // cookie on that response wipes a still-valid session and logs the user out
+  // on their next click. A fresh login overwrites the cookie anyway.
+  return NextResponse.redirect(url);
 }
 
 export const config = {
