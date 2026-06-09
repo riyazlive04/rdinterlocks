@@ -4,6 +4,8 @@ import { Card, PageHeader } from "@/components/ui";
 import { requireArea } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import { formatINR } from "@/lib/format";
+import { PayrollAdvanceForm } from "./advance-form";
+import { createWorkerAdvance } from "./actions";
 
 const monthNames = [
   "January", "February", "March", "April", "May", "June",
@@ -140,9 +142,24 @@ export default async function PayrollPage({
     net: [...operatorRows, ...masonRows, ...loaderRows, ...employeeRows].reduce((s, r) => s + net(r), 0),
   };
 
+  const advanceGroups = [
+    { type: "operator" as const, label: "Operators", people: operators.map((o) => ({ id: o.id, name: o.name })) },
+    { type: "mason" as const, label: "Masons", people: masons.map((m) => ({ id: m.id, name: m.name })) },
+    { type: "loader" as const, label: "Loaders", people: loaders.map((l) => ({ id: l.id, name: l.name })) },
+    { type: "employee" as const, label: "Employees", people: employees.map((e) => ({ id: e.id, name: e.name })) },
+  ];
+
   return (
     <>
       <PageHeader title="Payroll" sub="Everyone's wages & salary for the month, in one place" />
+
+      <PayrollAdvanceForm
+        groups={advanceGroups}
+        onSubmit={async (d) => {
+          "use server";
+          await createWorkerAdvance(d);
+        }}
+      />
 
       <Card className="mb-4">
         <div className="flex items-center justify-between">
