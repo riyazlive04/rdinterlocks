@@ -30,22 +30,27 @@ export default async function LoginPage({
           <h1 className="text-lg font-bold text-ink tracking-tight">Welcome back</h1>
           <p className="text-sm text-slate-500 mt-1">Sign in to continue</p>
           <form action="/api/login" method="post" className="mt-5 space-y-3">
-            <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500 flex items-center justify-between">
-              <span><span className="font-semibold text-ink">Admin</span></span>
-              <span className="text-[10px] uppercase tracking-wider text-slate-400">Owner</span>
-            </div>
+            <input
+              type="text"
+              name="name"
+              autoComplete="username"
+              placeholder="Username (e.g. Admin or Manager)"
+              defaultValue="Admin"
+              autoFocus
+              className="w-full px-3.5 py-3 rounded-xl bg-white border border-slate-200 text-base text-ink focus:outline-none focus:ring-2 focus:ring-brand-red/30 focus:border-brand-red"
+              required
+            />
             <input
               type="password"
               name="password"
               autoComplete="current-password"
               placeholder="Password"
-              autoFocus
               className="w-full px-3.5 py-3 rounded-xl bg-white border border-slate-200 text-base text-ink focus:outline-none focus:ring-2 focus:ring-brand-red/30 focus:border-brand-red"
               required
             />
             {error && (
               <div className="text-xs text-red-600 text-center">
-                {error === "invalid" ? "Incorrect password" : "Please enter your password"}
+                {error === "invalid" ? "Incorrect username or password" : "Please enter your password"}
               </div>
             )}
             <button

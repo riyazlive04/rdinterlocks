@@ -131,14 +131,22 @@ export async function requireAdmin(): Promise<Session> {
   return s;
 }
 
-// Password-only login: match the entered password against every active user
-// (admin should keep passwords unique). Returns the matching user's session.
-export async function verifyPin(pin: string): Promise<Session | null> {
+// Username + password login. Matches the name (case-insensitive) AND the
+// password against active users. If name is blank, falls back to matching by
+// password alone (so an empty name field still works). Returns the session.
+export async function verifyLogin(name: string, password: string): Promise<Session | null> {
   const users = await prisma.user.findMany({ where: { active: true } });
+  const target = name.trim().toLowerCase();
   for (const u of users) {
-    if (await bcrypt.compare(pin, u.pinHash)) {
+    if (target && u.name.trim().toLowerCase() !== target) continue;
+    if (await bcrypt.compare(password, u.pinHash)) {
       return { userId: u.id, name: u.name, role: u.role, permissions: u.permissions };
     }
   }
   return null;
+}
+
+// Back-compat alias (password-only) kept for any callers; prefer verifyLogin.
+export async function verifyPin(pin: string): Promise<Session | null> {
+  return verifyLogin("", pin);
 }

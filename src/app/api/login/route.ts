@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { verifyPin, signSession, sessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { verifyLogin, signSession, sessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/auth";
 
 // Classic form-POST login. Setting the session cookie directly on a redirect
 // response here is the most reliable path in every browser — unlike a Server
@@ -8,13 +8,14 @@ import { verifyPin, signSession, sessionCookieOptions, SESSION_COOKIE_NAME } fro
 // get bounced on the next click because no cookie was actually stored).
 export async function POST(req: Request) {
   const form = await req.formData();
+  const name = String(form.get("name") ?? "").trim();
   const password = String(form.get("password") ?? "").trim();
 
   if (!password) {
     return NextResponse.redirect(new URL("/login?error=missing", req.url), 303);
   }
 
-  const session = await verifyPin(password);
+  const session = await verifyLogin(name, password);
   if (!session) {
     return NextResponse.redirect(new URL("/login?error=invalid", req.url), 303);
   }
