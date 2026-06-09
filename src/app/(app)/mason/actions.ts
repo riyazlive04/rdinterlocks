@@ -34,6 +34,25 @@ export async function createMasonWork(input: z.infer<typeof workSchema>) {
   redirect("/mason");
 }
 
+export async function updateMasonWork(id: string, input: z.infer<typeof workSchema>) {
+  const p = workSchema.parse(input);
+  await prisma.masonWork.update({
+    where: { id },
+    data: {
+      date: new Date(p.date),
+      masonId: p.masonId,
+      siteName: p.siteName,
+      brickSizeId: p.brickSizeId,
+      constructionTypeId: p.constructionTypeId,
+      brickCount: p.brickCount,
+      ratePerBrick: p.ratePerBrick,
+      totalAmount: p.brickCount * p.ratePerBrick,
+    },
+  });
+  revalidatePath("/mason");
+  redirect("/mason");
+}
+
 export async function deleteMasonWork(id: string) {
   await prisma.masonWork.delete({ where: { id } });
   revalidatePath("/mason");
@@ -58,7 +77,7 @@ export async function giveMasonAdvance(input: z.infer<typeof advanceSchema>) {
       direction: "out",
       source: "advance",
       category: "Mason advance",
-      title: `${mason.name} — advance`,
+      title: `${mason.name} - advance`,
       notes: p.notes,
       method: p.method,
       advance: {

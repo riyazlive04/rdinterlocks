@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
+import { requireArea } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import { formatINR, formatShortDate, startOfDay, startOfMonth } from "@/lib/format";
 import { DeleteCashEntry } from "./delete-button";
@@ -10,6 +11,7 @@ export default async function CashbookPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string; direction?: string; source?: string }>;
 }) {
+  await requireArea("cash");
   const sp = await searchParams;
   const today = startOfDay();
   const from = sp?.from ? new Date(sp.from) : startOfMonth();
@@ -44,7 +46,7 @@ export default async function CashbookPage({
     <>
       <PageHeader
         title="Cashbook"
-        sub="All cash in and out — auto-tracked from operations + manual entries"
+        sub="All cash in and out - auto-tracked from operations + manual entries"
         right={
           <Link
             href="/cash/new"

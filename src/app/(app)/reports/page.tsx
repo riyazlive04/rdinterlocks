@@ -5,6 +5,10 @@ import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, startOfDay, startOfMonth, formatISODate } from "@/lib/format";
 import { getReportData, getSummaryData, ReportKind } from "@/lib/reports";
 import { LedgerView } from "@/components/ledger";
+import { CustomRange } from "./custom-range";
+import { ReportFilter } from "./report-filter";
+import { requireArea } from "@/lib/auth";
+import { can } from "@/lib/access";
 
 const kinds: Array<{ k: ReportKind | "summary"; label: string }> = [
   { k: "summary", label: "Summary" },
@@ -49,8 +53,12 @@ function rangeFor(preset: string, fromStr?: string, toStr?: string) {
       return { from: y, to: end };
     }
     case "custom": {
-      const f = fromStr ? new Date(fromStr) : startOfMonth();
-      const t = toStr ? new Date(toStr) : end;
+      const pf = fromStr ? new Date(fromStr) : startOfMonth();
+      const pt = toStr ? new Date(toStr) : end;
+      // Guard against malformed date inputs so a bad value can never
+      // throw a Prisma "invalid date" error and 500 the page.
+      const f = isNaN(pf.getTime()) ? startOfMonth() : pf;
+      const t = isNaN(pt.getTime()) ? end : pt;
       t.setHours(23, 59, 59, 999);
       return { from: f, to: t };
     }
@@ -74,8 +82,17 @@ export default async function ReportsPage({
     tipperId?: string;
   }>;
 }) {
+  const session = await requireArea("reports");
+  const canRevenue = can(session, "revenue");
+  // Summary (net profit/income) and Cashbook expose revenue — hide them from
+  // users without the "revenue" permission.
+  const visibleKinds = canRevenue
+    ? kinds
+    : kinds.filter((k) => k.k !== "summary" && k.k !== "cashbook");
+
   const sp = await searchParams;
-  const kind = (sp?.kind ?? "summary") as ReportKind | "summary";
+  let kind = (sp?.kind ?? (canRevenue ? "summary" : "production")) as ReportKind | "summary";
+  if (!canRevenue && (kind === "summary" || kind === "cashbook")) kind = "production";
   const range = sp?.range ?? "month";
   const { from, to } = rangeFor(range, sp?.from, sp?.to);
 
@@ -157,7 +174,7 @@ export default async function ReportsPage({
       <Card className="mb-4">
         <div className="space-y-3">
           <div className="flex flex-wrap gap-1.5">
-            {kinds.map((t) => (
+            {visibleKinds.map((t) => (
               <Link
                 key={t.k}
                 href={buildUrl({ kind: t.k })}
@@ -190,26 +207,18 @@ export default async function ReportsPage({
               </Link>
             ))}
             {range === "custom" && (
-              <form className="flex items-center gap-2" method="get">
-                <input type="hidden" name="kind" value={kind} />
-                <input type="hidden" name="range" value="custom" />
-                <input
-                  type="date"
-                  name="from"
-                  defaultValue={sp?.from ?? formatISODate(from)}
-                  className="px-2 py-1.5 rounded-lg border border-slate-200 text-[12px]"
-                />
-                <span className="text-slate-400">→</span>
-                <input
-                  type="date"
-                  name="to"
-                  defaultValue={sp?.to ?? formatISODate(to)}
-                  className="px-2 py-1.5 rounded-lg border border-slate-200 text-[12px]"
-                />
-                <button className="px-3 py-1.5 rounded-lg bg-ink text-white text-[12px] font-semibold">
-                  Apply
-                </button>
-              </form>
+              <CustomRange
+                params={{
+                  kind,
+                  clientId: sp?.clientId,
+                  brickSizeId: sp?.brickSizeId,
+                  categoryId: sp?.categoryId,
+                  vendorId: sp?.vendorId,
+                  tipperId: sp?.tipperId,
+                }}
+                fromDefault={sp?.from ?? formatISODate(from)}
+                toDefault={sp?.to ?? formatISODate(to)}
+              />
             )}
           </div>
 
@@ -506,34 +515,9 @@ function FilterDropdown({
   options: Array<{ value: string; label: string }>;
   buildHref: (v: string | undefined) => string;
 }) {
-  return (
-    <details className="relative">
-      <summary className="list-none cursor-pointer select-none px-2.5 py-1.5 rounded-lg bg-slate-100 text-[11px] font-semibold flex items-center gap-1.5 hover:bg-slate-200">
-        {label}
-        {value && (
-          <span className="bg-brand-red text-white px-1.5 rounded-full text-[10px]">1</span>
-        )}
-        <Icon.ChevronDown size={12} />
-      </summary>
-      <div className="absolute z-10 mt-1 bg-white rounded-xl border border-slate-200 shadow-cardLg max-h-72 overflow-y-auto min-w-[180px]">
-        <Link
-          href={buildHref(undefined)}
-          className="block px-3 py-2 text-[12px] hover:bg-slate-50 text-slate-500"
-        >
-          (Any)
-        </Link>
-        {options.map((o) => (
-          <Link
-            key={o.value}
-            href={buildHref(o.value)}
-            className={`block px-3 py-2 text-[12px] hover:bg-slate-50 ${
-              value === o.value ? "bg-brand-redLight text-brand-red font-semibold" : ""
-            }`}
-          >
-            {o.label}
-          </Link>
-        ))}
-      </div>
-    </details>
-  );
+  const opts = [
+    { label: "(Any)", href: buildHref(undefined), active: !value },
+    ...options.map((o) => ({ label: o.label, href: buildHref(o.value), active: value === o.value })),
+  ];
+  return <ReportFilter label={label} hasValue={!!value} options={opts} />;
 }

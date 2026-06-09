@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { LedgerData, LedgerCol, LedgerRow } from "@/lib/reports";
 
 function fmt(v: unknown, col: LedgerCol): string {
-  if (v == null || v === "") return "—";
+  if (v == null || v === "") return "-";
   if (typeof v === "number") {
     if (col.format === "money") {
       const sign = v < 0 ? "−" : "";

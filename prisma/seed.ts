@@ -96,7 +96,7 @@ async function main() {
     [size6h.id, room.id, 11, 10, 5.0],
     [size6h.id, compound.id, 9, 8, 5.0],
     [size6h.id, godown.id, 10, 9, 5.0],
-    [size8.id, room.id, 12, 10, 6.0],
+    [size8.id, room.id, 10, 10, 6.0],
     [size8.id, compound.id, 9, 8, 6.0],
     [size8.id, godown.id, 11, 9, 6.0],
   ];
@@ -140,6 +140,7 @@ async function main() {
     ["Salary", 24],
     ["Bonus", 25],
     ["EMI", 26],
+    ["Shifting charges", 27],
     ["Other", 99],
   ] as [string, number][]) {
     await prisma.expenseCategory.create({ data: { name, order } });

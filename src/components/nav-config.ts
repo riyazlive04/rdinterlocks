@@ -1,4 +1,5 @@
 import { IconName } from "./icons";
+import { can, isAdmin, type AccessUser } from "@/lib/access";
 
 export type NavItem = {
   id: string;
@@ -6,6 +7,8 @@ export type NavItem = {
   href: string;
   icon: IconName;
   matches?: string[];
+  area?: string; // access area key; undefined = visible to all logged-in users
+  adminOnly?: boolean;
 };
 
 export const primaryNav: NavItem[] = [
@@ -18,11 +21,25 @@ export const primaryNav: NavItem[] = [
     matches: ["/production"],
   },
   {
+    id: "day",
+    label: "Daily entry",
+    href: "/day",
+    icon: "Calendar",
+    matches: ["/day"],
+  },
+  {
     id: "sales",
     label: "Clients & Sales",
     href: "/clients",
     icon: "Receipt",
     matches: ["/clients"],
+  },
+  {
+    id: "deliveries",
+    label: "Deliveries",
+    href: "/deliveries",
+    icon: "Stack",
+    matches: ["/deliveries"],
   },
   {
     id: "tipper",
@@ -52,6 +69,13 @@ export const primaryNav: NavItem[] = [
     href: "/employees",
     icon: "Users",
     matches: ["/employees"],
+  },
+  {
+    id: "payroll",
+    label: "Payroll",
+    href: "/payroll",
+    icon: "Workers",
+    matches: ["/payroll"],
   },
   { id: "cash", label: "Cashbook", href: "/cash", icon: "Cash", matches: ["/cash"] },
   {
@@ -84,7 +108,7 @@ export const primaryNav: NavItem[] = [
   },
 ];
 
-// Mobile bottom nav — 5 most-used. Everything else lives behind a "More" sheet.
+// Mobile bottom nav - 5 most-used. Everything else lives behind a "More" sheet.
 export const mobileNav: NavItem[] = [
   { id: "home", label: "Home", href: "/", icon: "Home" },
   { id: "production", label: "Production", href: "/production", icon: "Brick", matches: ["/production"] },
@@ -97,4 +121,17 @@ export function isNavActive(item: NavItem, pathname: string) {
   if (item.href === "/" && pathname === "/") return true;
   if (item.matches?.some((m) => pathname.startsWith(m))) return true;
   return false;
+}
+
+// Items always shown to any logged-in user (no specific area gate).
+const ALWAYS_VISIBLE = new Set(["home", "guide", "more"]);
+
+// Filter a nav list to what the user may access. Each operational item's id
+// doubles as its access-area key; "settings" is admin-only.
+export function visibleNav(items: NavItem[], user: AccessUser): NavItem[] {
+  return items.filter((it) => {
+    if (it.id === "settings" || it.adminOnly) return isAdmin(user.role);
+    if (ALWAYS_VISIBLE.has(it.id)) return true;
+    return can(user, it.area ?? it.id);
+  });
 }

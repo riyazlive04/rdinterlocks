@@ -17,6 +17,8 @@ export default async function FactorySettingsPage() {
           gstin: s?.gstin ?? "",
           cementBagsPer1000: s?.cementBagsPer1000 ?? 18,
           cashOpening: s?.cashOpening ?? 0,
+          dryingDays: s?.dryingDays ?? 3,
+          curingDays: s?.curingDays ?? 10,
         }}
         onSave={async (data) => {
           "use server";

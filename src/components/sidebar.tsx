@@ -4,9 +4,17 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Icon } from "./icons";
-import { primaryNav, isNavActive } from "./nav-config";
+import { isNavActive, type NavItem } from "./nav-config";
 
-export function Sidebar({ userName }: { userName: string }) {
+export function Sidebar({
+  userName,
+  role,
+  items,
+}: {
+  userName: string;
+  role: string;
+  items: NavItem[];
+}) {
   const pathname = usePathname();
   return (
     <aside className="hidden md:flex md:w-60 lg:w-64 flex-shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0">
@@ -28,7 +36,7 @@ export function Sidebar({ userName }: { userName: string }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-0.5">
-        {primaryNav.map((it) => {
+        {items.map((it) => {
           const Ic = Icon[it.icon];
           const active = isNavActive(it, pathname);
           return (
@@ -63,7 +71,7 @@ export function Sidebar({ userName }: { userName: string }) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-semibold text-ink truncate">{userName}</div>
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Admin</div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider">{role}</div>
           </div>
           <Link
             href="/logout"

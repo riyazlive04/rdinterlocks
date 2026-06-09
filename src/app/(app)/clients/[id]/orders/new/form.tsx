@@ -26,25 +26,35 @@ export function OrderForm({
   sizes,
   ctypes,
   priceMap,
+  initial,
+  submitLabel,
+  hideAdvance,
   onSubmit,
 }: {
   clientId: string;
   sizes: Array<{ id: string; label: string }>;
   ctypes: Array<{ id: string; name: string }>;
   priceMap: Record<string, number>;
+  initial?: Partial<Sub>;
+  submitLabel?: string;
+  hideAdvance?: boolean;
   onSubmit: (d: Sub) => Promise<void>;
 }) {
-  const [date, setDate] = useState(formatISODate(new Date()));
-  const [expected, setExpected] = useState("");
-  const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<Item[]>([
-    {
-      brickSizeId: sizes[0]?.id ?? "",
-      constructionTypeId: ctypes[0]?.id ?? "",
-      quantity: 1000,
-      pricePerBrick: priceMap[`${sizes[0]?.id}_${ctypes[0]?.id}`] ?? 0,
-    },
-  ]);
+  const [date, setDate] = useState(initial?.date ?? formatISODate(new Date()));
+  const [expected, setExpected] = useState(initial?.expectedDeliveryDate ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [items, setItems] = useState<Item[]>(
+    initial?.items && initial.items.length > 0
+      ? initial.items
+      : [
+          {
+            brickSizeId: sizes[0]?.id ?? "",
+            constructionTypeId: ctypes[0]?.id ?? "",
+            quantity: 1000,
+            pricePerBrick: priceMap[`${sizes[0]?.id}_${ctypes[0]?.id}`] ?? 0,
+          },
+        ]
+  );
   const [advance, setAdvance] = useState<number | "">("");
   const [advanceMethod, setAdvanceMethod] = useState<Sub["advanceMethod"]>("cash");
   const [error, setError] = useState<string | null>(null);
@@ -196,43 +206,51 @@ export function OrderForm({
         </button>
       </Card>
 
-      <Card>
-        <div className="grid sm:grid-cols-3 gap-3">
+      {hideAdvance ? (
+        <Card>
           <Field label="Order total">
             <div className="num display text-2xl font-bold py-1.5">{formatINR(total)}</div>
           </Field>
-          <Field label="Advance now">
-            <Input
-              type="number"
-              value={advance}
-              onChange={(e) => setAdvance(e.target.value === "" ? "" : Number(e.target.value))}
-              placeholder="0"
-            />
-          </Field>
-          <Field label="Method">
-            <Select
-              value={advanceMethod}
-              onChange={(e) => setAdvanceMethod(e.target.value as Sub["advanceMethod"])}
-            >
-              <option value="cash">Cash</option>
-              <option value="gpay">GPay</option>
-              <option value="upi">UPI</option>
-              <option value="bank">Bank</option>
-              <option value="cheque">Cheque</option>
-            </Select>
-          </Field>
-        </div>
-        <div className="mt-2 text-[12px] text-slate-500">
-          Balance after advance:{" "}
-          <span className="num font-semibold text-ink">{formatINR(balance)}</span>
-        </div>
-      </Card>
+        </Card>
+      ) : (
+        <Card>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field label="Order total">
+              <div className="num display text-2xl font-bold py-1.5">{formatINR(total)}</div>
+            </Field>
+            <Field label="Advance now">
+              <Input
+                type="number"
+                value={advance}
+                onChange={(e) => setAdvance(e.target.value === "" ? "" : Number(e.target.value))}
+                placeholder="0"
+              />
+            </Field>
+            <Field label="Method">
+              <Select
+                value={advanceMethod}
+                onChange={(e) => setAdvanceMethod(e.target.value as Sub["advanceMethod"])}
+              >
+                <option value="cash">Cash</option>
+                <option value="gpay">GPay</option>
+                <option value="upi">UPI</option>
+                <option value="bank">Bank</option>
+                <option value="cheque">Cheque</option>
+              </Select>
+            </Field>
+          </div>
+          <div className="mt-2 text-[12px] text-slate-500">
+            Balance after advance:{" "}
+            <span className="num font-semibold text-ink">{formatINR(balance)}</span>
+          </div>
+        </Card>
+      )}
 
       {error && <div className="text-xs text-red-600">{error}</div>}
 
       <div className="flex justify-end">
         <Button onClick={submit} disabled={isPending} variant="primary" size="lg">
-          {isPending ? "Saving…" : "Save order"}
+          {isPending ? "Saving…" : submitLabel ?? "Save order"}
         </Button>
       </div>
     </div>

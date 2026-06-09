@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { primaryNav } from "@/components/nav-config";
+import { primaryNav, visibleNav } from "@/components/nav-config";
+import { requireSession } from "@/lib/auth";
 
-export default function MenuPage() {
+export default async function MenuPage() {
+  const session = await requireSession();
   return (
     <>
       <PageHeader title="Menu" sub="All sections" />
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {primaryNav
+        {visibleNav(primaryNav, session)
           .filter((it) => it.id !== "home")
           .map((it) => {
             const Ic = Icon[it.icon];

@@ -16,6 +16,9 @@ export default async function ClientDetailPage({
   const client = await prisma.client.findUnique({
     where: { id },
     include: {
+      // ALL payments for this client, including advances not tied to an
+      // order (orderId = null), so opening advances are counted too.
+      payments: { orderBy: { date: "desc" } },
       orders: {
         include: {
           items: { include: { brickSize: true, constructionType: true } },
@@ -39,32 +42,40 @@ export default async function ClientDetailPage({
   let ordered = 0,
     deliveredAmt = 0,
     addOns = 0,
-    refunded = 0,
-    paid = 0;
+    refunded = 0;
   for (const o of client.orders) {
     ordered += o.items.reduce((s, i) => s + i.total, 0);
-    paid += o.payments.reduce((s, p) => s + p.amount, 0);
     for (const d of o.deliveries) {
       deliveredAmt += d.items.reduce((s, i) => s + i.total, 0);
       addOns += d.addOns.reduce((s, a) => s + a.total, 0);
       refunded += d.returns.reduce((s, r) => s + r.refundAmount, 0);
     }
   }
+  // Paid = every payment recorded for the client (order payments + advances).
+  const paid = client.payments.reduce((s, p) => s + p.amount, 0);
   const balance = ordered + addOns - refunded - paid;
 
   return (
     <>
       <PageHeader
         title={client.name}
-        sub={`${client.location ?? "—"} ${client.phone ? `· ${client.phone}` : ""}`}
+        sub={`${client.location ?? "-"} ${client.phone ? `· ${client.phone}` : ""}`}
         back="/clients"
         right={
-          <Link
-            href={`/clients/${id}/orders/new`}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-red text-white text-[13px] font-semibold shadow-red"
-          >
-            <Icon.Plus size={16} stroke={2.4} /> New order
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href={`/clients/${id}/edit`}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-[13px] font-semibold hover:border-slate-400"
+            >
+              <Icon.Pencil size={15} stroke={2.2} /> Edit
+            </Link>
+            <Link
+              href={`/clients/${id}/orders/new`}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-red text-white text-[13px] font-semibold shadow-red"
+            >
+              <Icon.Plus size={16} stroke={2.4} /> New order
+            </Link>
+          </div>
         }
       />
 
@@ -209,7 +220,7 @@ export default async function ClientDetailPage({
                         return (
                           <div
                             key={d.id}
-                            className="flex items-baseline justify-between text-[12px] py-1"
+                            className="flex items-baseline justify-between text-[12px] py-1 gap-2"
                           >
                             <div>
                               <span className="mono text-slate-500">{formatShortDate(d.date)}</span>{" "}
@@ -217,18 +228,33 @@ export default async function ClientDetailPage({
                               {dAdd > 0 ? ` + ${formatINR(dAdd)} add-ons` : ""}
                               {dRef > 0 ? ` − ${formatINR(dRef)} return` : ""}
                             </div>
-                            <span className="num font-semibold">{formatINR(dTotal + dAdd - dRef)}</span>
+                            <div className="flex items-baseline gap-2 shrink-0">
+                              <span className="num font-semibold">{formatINR(dTotal + dAdd - dRef)}</span>
+                              <Link
+                                href={`/clients/${id}/orders/${o.id}/deliveries/${d.id}/edit`}
+                                className="text-slate-400 hover:text-ink"
+                                title="Edit delivery"
+                              >
+                                <Icon.Pencil size={12} />
+                              </Link>
+                            </div>
                           </div>
                         );
                       })}
                     </div>
                   )}
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex gap-4 mt-2">
                     <Link
                       href={`/clients/${id}/orders/${o.id}/deliveries/new`}
                       className="text-[12px] font-semibold text-brand-blue"
                     >
                       + Add delivery
+                    </Link>
+                    <Link
+                      href={`/clients/${id}/orders/${o.id}/edit`}
+                      className="text-[12px] font-semibold text-slate-500 hover:text-ink"
+                    >
+                      Edit order
                     </Link>
                   </div>
                 </Card>
@@ -257,25 +283,24 @@ export default async function ClientDetailPage({
 
           <Card>
             <h3 className="text-[14px] font-bold mb-3">Recent payments</h3>
-            {client.orders.flatMap((o) => o.payments).length === 0 ? (
+            {client.payments.length === 0 ? (
               <div className="text-center text-sm text-slate-500 py-4">No payments recorded.</div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {client.orders
-                  .flatMap((o) => o.payments)
-                  .sort((a, b) => b.date.getTime() - a.date.getTime())
-                  .slice(0, 8)
-                  .map((p) => (
-                    <div key={p.id} className="flex justify-between items-center py-2">
-                      <div>
-                        <div className="text-[12px] font-semibold capitalize">{p.method}</div>
-                        <div className="text-[10px] text-slate-500">{formatShortDate(p.date)}</div>
+                {client.payments.slice(0, 8).map((p) => (
+                  <div key={p.id} className="flex justify-between items-center py-2">
+                    <div>
+                      <div className="text-[12px] font-semibold capitalize">
+                        {p.method}
+                        {!p.orderId ? <span className="text-slate-400 font-normal"> · advance</span> : ""}
                       </div>
-                      <div className="num text-[13px] font-bold text-emerald-700">
-                        +{formatINR(p.amount)}
-                      </div>
+                      <div className="text-[10px] text-slate-500">{formatShortDate(p.date)}</div>
                     </div>
-                  ))}
+                    <div className="num text-[13px] font-bold text-emerald-700">
+                      +{formatINR(p.amount)}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </Card>

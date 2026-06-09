@@ -44,7 +44,7 @@ export default async function MasonPage({
     <>
       <PageHeader
         title="Mason work"
-        sub="Site-by-site brick laying — rate by brick size × construction type"
+        sub="Site-by-site brick laying - rate by brick size × construction type"
         right={
           <Link
             href="/mason/new"
@@ -137,7 +137,16 @@ export default async function MasonPage({
                     <Td align="right" className="num">₹{w.ratePerBrick}</Td>
                     <Td align="right" className="num font-bold">{formatINR(w.totalAmount)}</Td>
                     <Td align="right">
-                      <DeleteMason id={w.id} />
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/mason/${w.id}/edit`}
+                          className="w-8 h-8 rounded-md hover:bg-slate-100 inline-flex items-center justify-center text-slate-500"
+                          title="Edit"
+                        >
+                          <Icon.Pencil size={14} />
+                        </Link>
+                        <DeleteMason id={w.id} />
+                      </div>
                     </Td>
                   </tr>
                 ))}

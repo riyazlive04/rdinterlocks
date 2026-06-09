@@ -9,7 +9,7 @@ export default async function ConstructionTypesPage() {
     <>
       <PageHeader
         title="Construction types"
-        sub="Where the bricks get used — e.g. Room, Compound, Godown, Foundation"
+        sub="Where the bricks get used - e.g. Room, Compound, Godown, Foundation"
         back="/settings"
       />
       <MasterList

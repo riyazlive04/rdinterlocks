@@ -161,7 +161,7 @@ const sections: Array<{
       },
       {
         title: "Multi-operator wage split",
-        body: "Pick all operators on the line — total wage divides equally.",
+        body: "Pick all operators on the line - total wage divides equally.",
       },
     ],
   },
@@ -171,7 +171,7 @@ const sections: Array<{
     items: [
       {
         title: "Diary-style ledger",
-        body: "Each report shows entries grouped by date with sub-totals per day and a grand total at the bottom — same layout the owner uses in his diary.",
+        body: "Each report shows entries grouped by date with sub-totals per day and a grand total at the bottom - same layout the owner uses in his diary.",
         link: "/reports",
       },
       {
@@ -196,7 +196,7 @@ const sections: Array<{
       },
       {
         title: "Inline returns",
-        body: "Returns appear in the Sales report under their parent delivery — tracking exactly how the diary records them.",
+        body: "Returns appear in the Sales report under their parent delivery - tracking exactly how the diary records them.",
       },
     ],
   },
@@ -256,7 +256,7 @@ export default function GuidePage() {
       <Card className="mb-5">
         <div className="text-base font-bold text-ink mb-2">Quick reference</div>
         <div className="text-xs text-slate-500 mb-3">
-          Where to enter each action — and where the result shows up.
+          Where to enter each action - and where the result shows up.
         </div>
         <div className="overflow-x-auto -mx-4">
           <table className="w-full text-[13px]">

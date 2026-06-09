@@ -9,7 +9,7 @@ export default async function EmployeesSettingsPage() {
     <>
       <PageHeader
         title="Employees"
-        sub="Drivers, watchmen, staff — pay daily or monthly"
+        sub="Drivers, watchmen, staff - pay daily or monthly"
         back="/settings"
       />
       <MasterList

@@ -35,14 +35,14 @@ export async function createManualCashEntry(input: z.infer<typeof schema>) {
 }
 
 export async function deleteCashEntry(id: string) {
-  // Only allow deleting manual entries — auto entries should be deleted via their source
+  // Only allow deleting manual entries - auto entries should be deleted via their source
   const entry = await prisma.cashEntry.findUnique({ where: { id } });
   if (!entry) return;
   if (entry.source !== "manual") {
     throw new Error(
       "This entry was created by a " +
         entry.source +
-        " — delete it from that page to keep records consistent."
+        " - delete it from that page to keep records consistent."
     );
   }
   await prisma.cashEntry.delete({ where: { id } });

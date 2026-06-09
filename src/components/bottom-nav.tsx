@@ -3,14 +3,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Icon } from "./icons";
-import { mobileNav, isNavActive } from "./nav-config";
+import { isNavActive, type NavItem } from "./nav-config";
 
-export function BottomNav() {
+export function BottomNav({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
   return (
     <div className="md:hidden fixed left-0 right-0 bottom-0 z-30 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
-      <nav className="grid grid-cols-5 max-w-[420px] mx-auto">
-        {mobileNav.map((it) => {
+      <nav
+        className="grid max-w-[420px] mx-auto"
+        style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      >
+        {items.map((it) => {
           const Ic = Icon[it.icon];
           const active = isNavActive(it, pathname);
           return (

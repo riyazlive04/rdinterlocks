@@ -2,7 +2,7 @@ import "./globals.css";
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
-  title: "RD Interlock — Factory OS",
+  title: "RD Interlock - Factory OS",
   description: "Daily operations, stock, workers, and cashbook for RD Interlock brick factory.",
   manifest: "/manifest.json",
 };

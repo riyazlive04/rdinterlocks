@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
+import { requireArea } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate, startOfMonth } from "@/lib/format";
 
@@ -9,6 +10,7 @@ export default async function VehiclesPage({
 }: {
   searchParams: Promise<{ tab?: string }>;
 }) {
+  await requireArea("vehicles");
   const sp = await searchParams;
   const tab = sp?.tab ?? "fleet";
 
@@ -237,7 +239,7 @@ export default async function VehiclesPage({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-[14px] font-bold text-ink">{t.name}</div>
-                    <div className="mono text-[11px] text-slate-500">{t.plate ?? "—"}</div>
+                    <div className="mono text-[11px] text-slate-500">{t.plate ?? "-"}</div>
                   </div>
                   <Pill tone={t.ownership === "own" ? "success" : "blue"}>
                     {t.ownership === "own" ? "RD-own" : t.vendor?.name ?? "vendor"}
@@ -257,7 +259,7 @@ export default async function VehiclesPage({
                       EMI / mo
                     </div>
                     <div className="num font-bold mt-0.5">
-                      {t.emiAmount > 0 ? formatINR(t.emiAmount) : "—"}
+                      {t.emiAmount > 0 ? formatINR(t.emiAmount) : "-"}
                     </div>
                   </div>
                   <div className="bg-slate-50 rounded-lg p-2">

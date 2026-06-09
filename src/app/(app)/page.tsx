@@ -12,9 +12,12 @@ import {
   startOfWeek,
   relativeTime,
 } from "@/lib/format";
+import { stageForAge } from "@/lib/stock";
+import { can } from "@/lib/access";
 
 export default async function DashboardPage() {
   const session = await requireSession();
+  const canRevenue = can(session, "revenue");
   const today = startOfDay();
   const todayEnd = endOfDay();
   const weekStart = startOfWeek();
@@ -36,10 +39,9 @@ export default async function DashboardPage() {
       where: { date: { gte: today, lte: todayEnd } },
       _sum: { brickCount: true, totalWage: true, cementBagsUsed: true, damagedCount: true },
     }),
-    prisma.stockBatch.groupBy({
-      by: ["stage"],
-      _sum: { remaining: true },
-      where: { stage: { in: ["produced", "drying", "curing", "ready"] } },
+    prisma.stockBatch.findMany({
+      where: { remaining: { gt: 0 } },
+      select: { producedAt: true, remaining: true },
     }),
     prisma.cashEntry.findMany(),
     prisma.order.findMany({
@@ -80,9 +82,13 @@ export default async function DashboardPage() {
     .reduce((s, e) => s + e.amount, 0);
   const cashBalance = (settings?.cashOpening ?? 0) + cashIn - cashOut;
 
+  // Stage is derived from each batch's age + the configurable thresholds.
+  const dryingDays = settings?.dryingDays ?? 3;
+  const curingDays = settings?.curingDays ?? 10;
   const stageMap: Record<string, number> = { produced: 0, drying: 0, curing: 0, ready: 0 };
-  for (const s of stockBatches) {
-    stageMap[s.stage] = s._sum.remaining ?? 0;
+  for (const b of stockBatches) {
+    const st = stageForAge(b.producedAt, dryingDays, curingDays, todayEnd);
+    stageMap[st] += b.remaining;
   }
 
   const totalDue = pendingOrders.reduce((s, o) => {
@@ -113,7 +119,7 @@ export default async function DashboardPage() {
     alerts.push({
       severity: "high",
       title: `${o.client.name} delivery overdue`,
-      sub: `Expected ${o.expectedDeliveryDate?.toLocaleDateString("en-IN") ?? "—"}`,
+      sub: `Expected ${o.expectedDeliveryDate?.toLocaleDateString("en-IN") ?? "-"}`,
       href: `/clients/${o.clientId}`,
     });
   }
@@ -209,13 +215,15 @@ export default async function DashboardPage() {
           tone="default"
           icon={<Icon.Stack size={18} color="#475569" />}
         />
-        <KPI
-          label="Cash in hand"
-          value={formatINR(cashBalance, { compact: true })}
-          sub={`In ${formatINR(cashIn, { compact: true })} · Out ${formatINR(cashOut, { compact: true })}`}
-          tone="blue"
-          icon={<Icon.Cash size={18} color="#fff" />}
-        />
+        {canRevenue && (
+          <KPI
+            label="Cash in hand"
+            value={formatINR(cashBalance, { compact: true })}
+            sub={`In ${formatINR(cashIn, { compact: true })} · Out ${formatINR(cashOut, { compact: true })}`}
+            tone="blue"
+            icon={<Icon.Cash size={18} color="#fff" />}
+          />
+        )}
         <KPI
           label="Due from clients"
           value={formatINR(totalDue, { compact: true })}
@@ -267,7 +275,7 @@ export default async function DashboardPage() {
         {/* 7-day production chart */}
         <Card className="lg:col-span-2">
           <div className="flex items-baseline justify-between mb-3">
-            <div className="text-base font-bold text-ink">Production — last 7 days</div>
+            <div className="text-base font-bold text-ink">Production - last 7 days</div>
             <Link href="/reports?kind=production" className="text-xs font-semibold text-brand-blue">
               See report →
             </Link>
@@ -288,7 +296,7 @@ export default async function DashboardPage() {
                 </div>
                 <div className="text-[10px] text-slate-500 font-medium">{d.label}</div>
                 <div className="num text-[10px] font-semibold text-slate-700">
-                  {d.bricks > 0 ? formatNumber(d.bricks) : "—"}
+                  {d.bricks > 0 ? formatNumber(d.bricks) : "-"}
                 </div>
               </div>
             ))}
@@ -343,7 +351,8 @@ export default async function DashboardPage() {
           )}
         </Card>
 
-        {/* Today's activity */}
+        {/* Today's activity — cash movements, gated behind revenue access */}
+        {canRevenue && (
         <Card className="lg:col-span-1">
           <div className="flex items-baseline justify-between mb-3">
             <div>
@@ -392,6 +401,7 @@ export default async function DashboardPage() {
             </div>
           )}
         </Card>
+        )}
 
         {/* Stock pipeline */}
         <Card className="lg:col-span-3">
@@ -412,8 +422,8 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-4 gap-3">
             {[
               { k: "Produced", v: stageMap.produced, c: "#E11D2C", age: "Today" },
-              { k: "Drying", v: stageMap.drying, c: "#F59E0B", age: "1–3 d" },
-              { k: "Curing", v: stageMap.curing, c: "#1F4FFF", age: "4–10 d" },
+              { k: "Drying", v: stageMap.drying, c: "#F59E0B", age: "1-3 d" },
+              { k: "Curing", v: stageMap.curing, c: "#1F4FFF", age: "4-10 d" },
               { k: "Ready", v: stageMap.ready, c: "#10B981", age: "Sellable" },
             ].map((s) => (
               <div key={s.k} className="bg-slate-50 rounded-xl p-3 text-center">

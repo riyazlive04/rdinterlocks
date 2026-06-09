@@ -79,7 +79,7 @@ export function ExpenseForm({
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Cement — 25 bags"
+            placeholder="e.g. Cement - 25 bags"
             autoFocus
           />
         </Field>
@@ -93,7 +93,7 @@ export function ExpenseForm({
         </Field>
         <Field label="Vendor (optional)">
           <Select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
-            <option value="">— none —</option>
+            <option value="">- none -</option>
             {vendors.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.name}
@@ -103,7 +103,7 @@ export function ExpenseForm({
         </Field>
         <Field label="Tipper (if vehicle expense)">
           <Select value={tipperId} onChange={(e) => setTipperId(e.target.value)}>
-            <option value="">— none —</option>
+            <option value="">- none -</option>
             {tippers.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}

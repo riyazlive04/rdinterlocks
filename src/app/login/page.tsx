@@ -1,16 +1,6 @@
 import { redirect } from "next/navigation";
 import Image from "next/image";
-import { createSession, getSession, verifyPin } from "@/lib/auth";
-
-async function loginAction(formData: FormData) {
-  "use server";
-  const password = String(formData.get("password") ?? "").trim();
-  if (!password) return redirect("/login?error=missing");
-  const session = await verifyPin(password);
-  if (!session) return redirect("/login?error=invalid");
-  await createSession(session);
-  redirect("/");
-}
+import { getSession } from "@/lib/auth";
 
 export default async function LoginPage({
   searchParams,
@@ -39,7 +29,7 @@ export default async function LoginPage({
         <div className="bg-white rounded-2xl shadow-cardLg border border-slate-900/[.06] p-6">
           <h1 className="text-lg font-bold text-ink tracking-tight">Welcome back</h1>
           <p className="text-sm text-slate-500 mt-1">Sign in to continue</p>
-          <form action={loginAction} className="mt-5 space-y-3">
+          <form action="/api/login" method="post" className="mt-5 space-y-3">
             <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500 flex items-center justify-between">
               <span><span className="font-semibold text-ink">Admin</span></span>
               <span className="text-[10px] uppercase tracking-wider text-slate-400">Owner</span>

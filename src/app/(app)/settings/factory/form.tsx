@@ -11,6 +11,8 @@ type Settings = {
   gstin: string;
   cementBagsPer1000: number;
   cashOpening: number;
+  dryingDays: number;
+  curingDays: number;
 };
 
 export function FactoryForm({
@@ -35,6 +37,8 @@ export function FactoryForm({
           ...form,
           cementBagsPer1000: Number(form.cementBagsPer1000),
           cashOpening: Number(form.cashOpening),
+          dryingDays: Math.max(0, Math.round(Number(form.dryingDays))),
+          curingDays: Math.max(0, Math.round(Number(form.curingDays))),
         });
         setSaved(true);
         router.refresh();
@@ -92,6 +96,20 @@ export function FactoryForm({
             type="number"
             value={form.cashOpening}
             onChange={(e) => setForm({ ...form, cashOpening: Number(e.target.value) })}
+          />
+        </Field>
+        <Field label="Drying days" hint="Days 1..N after production count as Drying.">
+          <Input
+            type="number"
+            value={form.dryingDays}
+            onChange={(e) => setForm({ ...form, dryingDays: Number(e.target.value) })}
+          />
+        </Field>
+        <Field label="Curing days" hint="Up to this many days = Curing; after that, Ready.">
+          <Input
+            type="number"
+            value={form.curingDays}
+            onChange={(e) => setForm({ ...form, curingDays: Number(e.target.value) })}
           />
         </Field>
       </div>

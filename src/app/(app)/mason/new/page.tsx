@@ -24,7 +24,7 @@ export default async function NewMasonWorkPage() {
   }
   return (
     <>
-      <PageHeader title="Mason work — new entry" back="/mason" />
+      <PageHeader title="Mason work - new entry" back="/mason" />
       <MasonWorkForm
         masons={masons.map((m) => ({ id: m.id, name: m.name }))}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}

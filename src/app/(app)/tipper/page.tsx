@@ -39,7 +39,7 @@ export default async function TipperPage({
     <>
       <PageHeader
         title="Tipper loads"
-        sub="Own RD trucks + vendor (AVM) trucks — bricks and raw materials"
+        sub="Own RD trucks + vendor (AVM) trucks - bricks and raw materials"
         right={
           <Link
             href="/tipper/new"
@@ -135,7 +135,7 @@ export default async function TipperPage({
                     <Td>
                       {l.loadType === "bricks" ? (
                         <Pill tone="red">
-                          {l.brickSize?.label ?? "—"} bricks
+                          {l.brickSize?.label ?? "-"} bricks
                         </Pill>
                       ) : (
                         <Pill tone="blue">{l.materialName ?? "Material"}</Pill>
@@ -146,7 +146,7 @@ export default async function TipperPage({
                     </Td>
                     <Td className="text-slate-600">
                       <span className="text-[12px]">
-                        {l.fromLocation ?? "—"} → {l.toLocation ?? "—"}
+                        {l.fromLocation ?? "-"} → {l.toLocation ?? "-"}
                       </span>
                     </Td>
                     <Td align="right">
@@ -160,7 +160,7 @@ export default async function TipperPage({
                           {formatINR(l.rentAmount)}
                         </span>
                       ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-400">-</span>
                       )}
                     </Td>
                     <Td align="right">

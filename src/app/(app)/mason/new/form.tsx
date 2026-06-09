@@ -18,28 +18,38 @@ export function MasonWorkForm({
   sizes,
   ctypes,
   priceMap,
+  initial,
+  submitLabel,
   onSubmit,
 }: {
   masons: Array<{ id: string; name: string }>;
   sizes: Array<{ id: string; label: string }>;
   ctypes: Array<{ id: string; name: string }>;
   priceMap: Record<string, number>;
+  initial?: Partial<Sub>;
+  submitLabel?: string;
   onSubmit: (d: Sub) => Promise<void>;
 }) {
-  const [date, setDate] = useState(formatISODate(new Date()));
-  const [masonId, setMasonId] = useState(masons[0]?.id ?? "");
-  const [siteName, setSiteName] = useState("");
-  const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
-  const [constructionTypeId, setConstructionTypeId] = useState(ctypes[0]?.id ?? "");
-  const [brickCount, setBrickCount] = useState<number>(1000);
-  const [ratePerBrick, setRatePerBrick] = useState<number>(0);
+  const isEdit = !!initial;
+  const [date, setDate] = useState(initial?.date ?? formatISODate(new Date()));
+  const [masonId, setMasonId] = useState(initial?.masonId ?? masons[0]?.id ?? "");
+  const [siteName, setSiteName] = useState(initial?.siteName ?? "");
+  const [brickSizeId, setBrickSizeId] = useState(initial?.brickSizeId ?? sizes[0]?.id ?? "");
+  const [constructionTypeId, setConstructionTypeId] = useState(
+    initial?.constructionTypeId ?? ctypes[0]?.id ?? ""
+  );
+  const [brickCount, setBrickCount] = useState<number>(initial?.brickCount ?? 1000);
+  const [ratePerBrick, setRatePerBrick] = useState<number>(initial?.ratePerBrick ?? 0);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Only auto-fill the rate from the price matrix on a fresh entry; when
+  // editing, preserve the saved rate unless the user changes size/type.
   useEffect(() => {
+    if (isEdit) return;
     const r = priceMap[`${brickSizeId}_${constructionTypeId}`];
     if (r != null) setRatePerBrick(r);
-  }, [brickSizeId, constructionTypeId, priceMap]);
+  }, [brickSizeId, constructionTypeId, priceMap, isEdit]);
 
   const total = brickCount * ratePerBrick;
 
@@ -132,7 +142,7 @@ export function MasonWorkForm({
       {error && <div className="text-xs text-red-600 mt-2">{error}</div>}
       <div className="mt-4">
         <Button onClick={submit} disabled={isPending} variant="primary" size="lg">
-          {isPending ? "Saving…" : "Save mason work"}
+          {isPending ? "Saving…" : submitLabel ?? "Save mason work"}
         </Button>
       </div>
     </Card>

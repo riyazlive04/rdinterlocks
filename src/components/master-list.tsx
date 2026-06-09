@@ -125,7 +125,7 @@ export function MasterList<T extends MasterRow>({
                 value={(form[f.key] as string | undefined) ?? ""}
                 onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
               >
-                <option value="">— select —</option>
+                <option value="">- select -</option>
                 {f.options.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
@@ -165,7 +165,7 @@ export function MasterList<T extends MasterRow>({
   );
 
   const formatCell = (col: MasterColumn, val: unknown) => {
-    if (val == null || val === "") return <span className="text-slate-400">—</span>;
+    if (val == null || val === "") return <span className="text-slate-400">-</span>;
     switch (col.format) {
       case "bold":
         return <span className="font-semibold text-ink">{String(val)}</span>;

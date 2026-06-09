@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate, startOfDay } from "@/lib/format";
+import { stageForAge, stageLabel } from "@/lib/stock";
 import { DeleteButton } from "./delete-button";
 
 export default async function ProductionPage({
@@ -16,16 +17,21 @@ export default async function ProductionPage({
   const to = sp?.to ? new Date(sp.to) : today;
   to.setHours(23, 59, 59, 999);
 
-  const entries = await prisma.productionEntry.findMany({
-    where: { date: { gte: from, lte: to } },
-    include: {
-      brickSize: true,
-      machine: true,
-      shares: { include: { operator: true } },
-      batch: true,
-    },
-    orderBy: { date: "desc" },
-  });
+  const [entries, settings] = await Promise.all([
+    prisma.productionEntry.findMany({
+      where: { date: { gte: from, lte: to } },
+      include: {
+        brickSize: true,
+        machine: true,
+        shares: { include: { operator: true } },
+        batch: true,
+      },
+      orderBy: { date: "desc" },
+    }),
+    prisma.settings.findUnique({ where: { id: "default" } }),
+  ]);
+  const dryingDays = settings?.dryingDays ?? 3;
+  const curingDays = settings?.curingDays ?? 10;
 
   const totals = entries.reduce(
     (a, e) => ({
@@ -116,7 +122,7 @@ export default async function ProductionPage({
                         {e.shift === "day" ? "Day" : "Night"}
                       </Pill>
                     </Td>
-                    <Td className="text-slate-600">{e.machine?.name ?? "—"}</Td>
+                    <Td className="text-slate-600">{e.machine?.name ?? "-"}</Td>
                     <Td>
                       <span className="mono font-semibold">{e.brickSize.label}</span>
                     </Td>
@@ -124,7 +130,7 @@ export default async function ProductionPage({
                       {formatNumber(e.brickCount)}
                     </Td>
                     <Td align="right" className="num text-brand-red">
-                      {e.damagedCount > 0 ? formatNumber(e.damagedCount) : "—"}
+                      {e.damagedCount > 0 ? formatNumber(e.damagedCount) : "-"}
                     </Td>
                     <Td align="right" className="num">{e.cementBagsUsed.toFixed(1)}</Td>
                     <Td className="text-[12px] text-slate-600">
@@ -135,23 +141,37 @@ export default async function ProductionPage({
                     </Td>
                     <Td>
                       {e.batch ? (
-                        <Pill tone={
-                          e.batch.stage === "ready"
-                            ? "success"
-                            : e.batch.stage === "produced"
-                              ? "red"
-                              : e.batch.stage === "curing"
-                                ? "blue"
-                                : "warning"
-                        }>
-                          {e.batch.code} · {e.batch.stage}
-                        </Pill>
+                        (() => {
+                          const st = stageForAge(e.batch.producedAt, dryingDays, curingDays);
+                          return (
+                            <Pill tone={
+                              st === "ready"
+                                ? "success"
+                                : st === "produced"
+                                  ? "red"
+                                  : st === "curing"
+                                    ? "blue"
+                                    : "warning"
+                            }>
+                              {e.batch.code} · {stageLabel[st]}
+                            </Pill>
+                          );
+                        })()
                       ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-400">-</span>
                       )}
                     </Td>
                     <Td align="right">
-                      <DeleteButton id={e.id} />
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/production/${e.id}/edit`}
+                          className="w-8 h-8 rounded-md hover:bg-slate-100 inline-flex items-center justify-center text-slate-500"
+                          title="Edit"
+                        >
+                          <Icon.Pencil size={14} />
+                        </Link>
+                        <DeleteButton id={e.id} />
+                      </div>
                     </Td>
                   </tr>
                 ))}

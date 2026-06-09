@@ -42,7 +42,7 @@ export default async function NewProductionPage() {
     <>
       <PageHeader title="New production entry" back="/production" />
       <ProductionForm
-        sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
+        sizes={sizes.map((s) => ({ id: s.id, label: s.label, dayRate: s.dayRate, nightRate: s.nightRate }))}
         operators={operators.map((o) => ({ id: o.id, name: o.name }))}
         machines={machines.map((m) => ({ id: m.id, name: m.name }))}
         cementBagsPer1000={settings?.cementBagsPer1000 ?? 18}

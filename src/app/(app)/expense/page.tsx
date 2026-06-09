@@ -58,7 +58,7 @@ export default async function ExpensePage({
       {top.length > 0 && (
         <Card className="mb-5">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-3">
-            Top categories — last 30 days
+            Top categories - last 30 days
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
             {top.map(([k, v]) => (
@@ -131,10 +131,10 @@ export default async function ExpensePage({
                     <Td>
                       <Pill tone="slate">{e.category.name}</Pill>
                     </Td>
-                    <Td className="text-slate-600">{e.vendor?.name ?? "—"}</Td>
+                    <Td className="text-slate-600">{e.vendor?.name ?? "-"}</Td>
                     <Td>
                       <span className="capitalize text-slate-600 text-[12px]">
-                        {/* method comes from the linked cashEntry; show "—" when not loaded */}
+                        {/* method comes from the linked cashEntry; show "-" when not loaded */}
                         cash
                       </span>
                     </Td>

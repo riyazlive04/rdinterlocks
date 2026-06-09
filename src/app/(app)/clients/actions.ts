@@ -28,6 +28,56 @@ export async function createClient(input: z.infer<typeof clientSchema>) {
   return c;
 }
 
+// Create a client and, if they pay an opening advance at the same time,
+// record it as an unallocated client payment (cash in). Matches the owner's
+// workflow of "add a new client the moment they pay an advance".
+const clientWithAdvanceSchema = clientSchema.extend({
+  advance: z.number().nonnegative().default(0),
+  advanceMethod: z.enum(["cash", "gpay", "bank", "upi", "cheque"]).default("cash"),
+  advanceDate: z.string().optional(),
+});
+
+export async function createClientWithAdvance(
+  input: z.infer<typeof clientWithAdvanceSchema>
+) {
+  const p = clientWithAdvanceSchema.parse(input);
+  const c = await prisma.client.create({
+    data: {
+      name: p.name.trim(),
+      location: p.location?.trim() || null,
+      phone: p.phone?.trim() || null,
+      notes: p.notes?.trim() || null,
+    },
+  });
+  if (p.advance > 0) {
+    const date = p.advanceDate ? new Date(p.advanceDate) : new Date();
+    await prisma.cashEntry.create({
+      data: {
+        date,
+        amount: p.advance,
+        direction: "in",
+        source: "sale",
+        category: "Advance from client",
+        title: `${c.name} - opening advance`,
+        method: p.advanceMethod,
+        clientPayment: {
+          create: {
+            clientId: c.id,
+            orderId: null,
+            date,
+            amount: p.advance,
+            method: p.advanceMethod,
+            notes: "Opening advance",
+          },
+        },
+      },
+    });
+  }
+  revalidatePath("/clients");
+  revalidatePath("/cash");
+  return c;
+}
+
 export async function updateClient(id: string, input: z.infer<typeof clientSchema>) {
   const p = clientSchema.parse(input);
   await prisma.client.update({
@@ -99,7 +149,7 @@ export async function createOrder(input: z.infer<typeof orderSchema>) {
         direction: "in",
         source: "sale",
         category: "Advance from client",
-        title: `${order.client.name} — order advance`,
+        title: `${order.client.name} - order advance`,
         method: p.advanceMethod,
         clientPayment: {
           create: {
@@ -119,6 +169,50 @@ export async function createOrder(input: z.infer<typeof orderSchema>) {
   revalidatePath(`/clients/${p.clientId}`);
   revalidatePath("/cash");
   redirect(`/clients/${p.clientId}`);
+}
+
+// Edit an order: update its fields and replace its line items. Advance /
+// payments are separate cash entries and are left untouched here (edit those
+// from the cash book / payments). Order status is recomputed against deliveries.
+const orderEditSchema = z.object({
+  date: z.string(),
+  expectedDeliveryDate: z.string().optional(),
+  notes: z.string().optional(),
+  items: z.array(orderItemSchema).min(1),
+});
+
+export async function updateOrder(id: string, input: z.infer<typeof orderEditSchema>) {
+  const p = orderEditSchema.parse(input);
+  const existing = await prisma.order.findUnique({ where: { id } });
+  if (!existing) throw new Error("Order not found");
+  const date = new Date(p.date);
+  const expected = p.expectedDeliveryDate ? new Date(p.expectedDeliveryDate) : null;
+
+  await prisma.$transaction([
+    prisma.orderItem.deleteMany({ where: { orderId: id } }),
+    prisma.order.update({
+      where: { id },
+      data: {
+        date,
+        expectedDeliveryDate: expected,
+        notes: p.notes,
+        items: {
+          create: p.items.map((it) => ({
+            brickSizeId: it.brickSizeId,
+            constructionTypeId: it.constructionTypeId,
+            quantity: it.quantity,
+            pricePerBrick: it.pricePerBrick,
+            total: it.quantity * it.pricePerBrick,
+          })),
+        },
+      },
+    }),
+  ]);
+
+  await recomputeOrderStatus(id);
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${existing.clientId}`);
+  redirect(`/clients/${existing.clientId}`);
 }
 
 export async function deleteOrder(id: string) {
@@ -225,7 +319,7 @@ export async function createDelivery(input: z.infer<typeof deliverySchema>) {
         direction: "in",
         source: "sale",
         category: "Sales",
-        title: `${order.client.name} — payment`,
+        title: `${order.client.name} - payment`,
         method: p.paymentMethod,
         clientPayment: {
           create: {
@@ -248,6 +342,85 @@ export async function createDelivery(input: z.infer<typeof deliverySchema>) {
   revalidatePath(`/clients/${order.clientId}`);
   revalidatePath("/cash");
   redirect(`/clients/${order.clientId}`);
+}
+
+// Edit a delivery: update fields and replace its items / add-ons / returns.
+// The payment recorded at delivery time is a separate cash entry and is left
+// untouched (edit it from the cash book). Order status is recomputed.
+const deliveryEditSchema = z.object({
+  date: z.string(),
+  truckPlate: z.string().optional(),
+  notes: z.string().optional(),
+  items: z.array(deliveryItemSchema).min(1),
+  addOns: z.array(deliveryAddOnSchema).default([]),
+  returns: z.array(returnSchema).default([]),
+});
+
+export async function updateDelivery(id: string, input: z.infer<typeof deliveryEditSchema>) {
+  const p = deliveryEditSchema.parse(input);
+  const existing = await prisma.delivery.findUnique({
+    where: { id },
+    include: { order: true },
+  });
+  if (!existing) throw new Error("Delivery not found");
+  const date = new Date(p.date);
+
+  await prisma.$transaction([
+    prisma.deliveryItem.deleteMany({ where: { deliveryId: id } }),
+    prisma.deliveryAddOn.deleteMany({ where: { deliveryId: id } }),
+    prisma.deliveryReturn.deleteMany({ where: { deliveryId: id } }),
+    prisma.delivery.update({
+      where: { id },
+      data: {
+        date,
+        truckPlate: p.truckPlate?.trim() || null,
+        notes: p.notes,
+        items: {
+          create: p.items.map((it) => ({
+            brickSizeId: it.brickSizeId,
+            constructionTypeId: it.constructionTypeId,
+            quantity: it.quantity,
+            pricePerBrick: it.pricePerBrick,
+            total: it.quantity * it.pricePerBrick,
+          })),
+        },
+        addOns: p.addOns.length
+          ? {
+              create: p.addOns.map((a) => ({
+                name: a.name,
+                quantity: a.quantity,
+                unit: a.unit,
+                pricePerUnit: a.pricePerUnit,
+                total: a.quantity * a.pricePerUnit,
+              })),
+            }
+          : undefined,
+        returns: p.returns.length
+          ? {
+              create: p.returns.map((r) => ({
+                brickCount: r.brickCount,
+                refundAmount: r.refundAmount,
+                notes: r.notes,
+              })),
+            }
+          : undefined,
+      },
+    }),
+  ]);
+
+  await recomputeOrderStatus(existing.orderId);
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${existing.order.clientId}`);
+  redirect(`/clients/${existing.order.clientId}`);
+}
+
+// Mark (or unmark) a delivery as done — used by the evening deliveries review.
+export async function setDeliveryDone(id: string, done: boolean) {
+  await prisma.delivery.update({
+    where: { id },
+    data: { completedAt: done ? new Date() : null },
+  });
+  revalidatePath("/deliveries");
 }
 
 export async function deleteDelivery(id: string) {
@@ -298,7 +471,7 @@ export async function recordPayment(input: z.infer<typeof paymentSchema>) {
       direction: "in",
       source: "sale",
       category: "Client payment",
-      title: `${client.name} — payment`,
+      title: `${client.name} - payment`,
       notes: p.notes,
       method: p.method,
       clientPayment: {

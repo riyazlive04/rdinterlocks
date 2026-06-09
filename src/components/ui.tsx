@@ -1,6 +1,7 @@
 import * as React from "react";
 import clsx from "clsx";
 import Image from "next/image";
+import Link from "next/link";
 
 export function Avatar({
   name,
@@ -142,7 +143,7 @@ export function PageHeader({
   return (
     <div className="flex items-center gap-3 mb-4">
       {back && (
-        <a
+        <Link
           href={back}
           className="w-9 h-9 rounded-xl bg-white border border-slate-900/[.08] flex items-center justify-center hover:bg-slate-50"
           aria-label="Back"
@@ -150,7 +151,7 @@ export function PageHeader({
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0B1220" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="M15 6l-6 6 6 6" />
           </svg>
-        </a>
+        </Link>
       )}
       <div className="flex-1 min-w-0">
         <div className="text-xl md:text-2xl font-bold text-ink tracking-tight truncate">{title}</div>

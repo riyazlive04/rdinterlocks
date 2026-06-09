@@ -62,7 +62,7 @@ export function PaymentForm({
       {orders.length > 0 && (
         <Field label="Against order (optional)">
           <Select value={orderId} onChange={(e) => setOrderId(e.target.value)}>
-            <option value="">— general —</option>
+            <option value="">- general -</option>
             {orders.map((o) => (
               <option key={o.id} value={o.id}>
                 {o.label}

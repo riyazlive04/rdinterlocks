@@ -25,12 +25,24 @@ type Sub = {
   paymentMethod: "cash" | "gpay" | "bank" | "upi" | "cheque";
 };
 
+type DeliveryInitial = {
+  date: string;
+  truckPlate?: string;
+  notes?: string;
+  items: Item[];
+  addOns: AddOn[];
+  returns: Return[];
+};
+
 export function DeliveryForm({
   orderId,
   sizes,
   ctypes,
   priceMap,
   defaults,
+  initial,
+  submitLabel,
+  hidePayment,
   onSubmit,
 }: {
   orderId: string;
@@ -38,21 +50,30 @@ export function DeliveryForm({
   ctypes: Array<{ id: string; name: string }>;
   priceMap: Record<string, number>;
   defaults: Item[];
+  initial?: DeliveryInitial;
+  submitLabel?: string;
+  hidePayment?: boolean;
   onSubmit: (d: Sub) => Promise<void>;
 }) {
-  const [date, setDate] = useState(formatISODate(new Date()));
-  const [truckPlate, setTruckPlate] = useState("");
-  const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<Item[]>(defaults.length > 0 ? defaults : [
-    {
-      brickSizeId: sizes[0]?.id ?? "",
-      constructionTypeId: ctypes[0]?.id ?? "",
-      quantity: 1000,
-      pricePerBrick: priceMap[`${sizes[0]?.id}_${ctypes[0]?.id}`] ?? 0,
-    },
-  ]);
-  const [addOns, setAddOns] = useState<AddOn[]>([]);
-  const [returns, setReturns] = useState<Return[]>([]);
+  const [date, setDate] = useState(initial?.date ?? formatISODate(new Date()));
+  const [truckPlate, setTruckPlate] = useState(initial?.truckPlate ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [items, setItems] = useState<Item[]>(
+    initial?.items && initial.items.length > 0
+      ? initial.items
+      : defaults.length > 0
+        ? defaults
+        : [
+            {
+              brickSizeId: sizes[0]?.id ?? "",
+              constructionTypeId: ctypes[0]?.id ?? "",
+              quantity: 1000,
+              pricePerBrick: priceMap[`${sizes[0]?.id}_${ctypes[0]?.id}`] ?? 0,
+            },
+          ]
+  );
+  const [addOns, setAddOns] = useState<AddOn[]>(initial?.addOns ?? []);
+  const [returns, setReturns] = useState<Return[]>(initial?.returns ?? []);
   const [paymentReceived, setPaymentReceived] = useState<number | "">("");
   const [paymentMethod, setPaymentMethod] = useState<Sub["paymentMethod"]>("cash");
   const [error, setError] = useState<string | null>(null);
@@ -350,33 +371,39 @@ export function DeliveryForm({
           <Field label="Delivery total">
             <div className="num display text-2xl font-bold py-1">{formatINR(grandTotal)}</div>
           </Field>
-          <Field label="Payment received now">
-            <Input
-              type="number"
-              value={paymentReceived}
-              onChange={(e) =>
-                setPaymentReceived(e.target.value === "" ? "" : Number(e.target.value))
-              }
-              placeholder="0"
-            />
-          </Field>
-          <Field label="Method">
-            <Select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value as Sub["paymentMethod"])}
-            >
-              <option value="cash">Cash</option>
-              <option value="gpay">GPay</option>
-              <option value="upi">UPI</option>
-              <option value="bank">Bank</option>
-              <option value="cheque">Cheque</option>
-            </Select>
-          </Field>
+          {!hidePayment && (
+            <>
+              <Field label="Payment received now">
+                <Input
+                  type="number"
+                  value={paymentReceived}
+                  onChange={(e) =>
+                    setPaymentReceived(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  placeholder="0"
+                />
+              </Field>
+              <Field label="Method">
+                <Select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value as Sub["paymentMethod"])}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="gpay">GPay</option>
+                  <option value="upi">UPI</option>
+                  <option value="bank">Bank</option>
+                  <option value="cheque">Cheque</option>
+                </Select>
+              </Field>
+            </>
+          )}
         </div>
-        <div className="mt-2 text-[12px] text-slate-500">
-          Balance after this payment:{" "}
-          <span className="num font-semibold text-ink">{formatINR(balance)}</span>
-        </div>
+        {!hidePayment && (
+          <div className="mt-2 text-[12px] text-slate-500">
+            Balance after this payment:{" "}
+            <span className="num font-semibold text-ink">{formatINR(balance)}</span>
+          </div>
+        )}
       </Card>
 
       {error && <div className="text-xs text-red-600">{error}</div>}

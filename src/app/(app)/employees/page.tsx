@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
+import { requireArea } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import { formatINR, startOfDay, endOfDay } from "@/lib/format";
 
 export default async function EmployeesPage() {
+  await requireArea("employees");
   const today = startOfDay();
   const [employees, attendance, advances] = await Promise.all([
     prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
@@ -22,7 +24,7 @@ export default async function EmployeesPage() {
     <>
       <PageHeader
         title="Employees"
-        sub="Drivers, watchmen, and other staff — attendance + salary"
+        sub="Drivers, watchmen, and other staff - attendance + salary"
         right={
           <Link
             href="/settings/employees"
@@ -49,7 +51,7 @@ export default async function EmployeesPage() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {employees.map((e) => {
-            const status = attMap.get(e.id) ?? "—";
+            const status = attMap.get(e.id) ?? "-";
             const advance = advMap[e.id] ?? 0;
             const dot =
               status === "present"

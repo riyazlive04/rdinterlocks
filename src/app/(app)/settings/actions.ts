@@ -6,16 +6,34 @@ import { prisma } from "@/lib/db";
 
 // ─── Brick sizes ───────────────────────────────────────────────────────
 
-export async function createBrickSize(data: { label: string; order?: number }) {
+export async function createBrickSize(data: {
+  label: string;
+  order?: number;
+  dayRate?: number;
+  nightRate?: number;
+}) {
   await prisma.brickSize.create({
-    data: { label: data.label.trim(), order: Number(data.order ?? 0) },
+    data: {
+      label: data.label.trim(),
+      order: Number(data.order ?? 0),
+      dayRate: Number(data.dayRate ?? 0),
+      nightRate: Number(data.nightRate ?? 0),
+    },
   });
   revalidatePath("/settings/brick-sizes");
 }
-export async function updateBrickSize(id: string, data: { label: string; order?: number }) {
+export async function updateBrickSize(
+  id: string,
+  data: { label: string; order?: number; dayRate?: number; nightRate?: number }
+) {
   await prisma.brickSize.update({
     where: { id },
-    data: { label: data.label.trim(), order: Number(data.order ?? 0) },
+    data: {
+      label: data.label.trim(),
+      order: Number(data.order ?? 0),
+      dayRate: Number(data.dayRate ?? 0),
+      nightRate: Number(data.nightRate ?? 0),
+    },
   });
   revalidatePath("/settings/brick-sizes");
 }
@@ -275,6 +293,8 @@ const settingsSchema = z.object({
   gstin: z.string().default(""),
   cementBagsPer1000: z.number().nonnegative(),
   cashOpening: z.number(),
+  dryingDays: z.number().int().nonnegative().default(3),
+  curingDays: z.number().int().nonnegative().default(10),
 });
 
 export async function updateSettings(data: z.infer<typeof settingsSchema>) {
@@ -304,4 +324,81 @@ export async function changePassword(data: z.infer<typeof passwordSchema>) {
     where: { id: owner.id },
     data: { pinHash: await bcrypt.hash(p.next, 10) },
   });
+}
+
+// ─── Users & access (admin-managed) ───────────────────────────────────
+
+const roleEnum = z.enum(["admin", "manager", "staff"]);
+
+const userCreateSchema = z.object({
+  name: z.string().min(1),
+  password: z.string().min(4),
+  role: roleEnum.default("manager"),
+  permissions: z.array(z.string()).default([]),
+});
+
+export async function createUser(input: z.infer<typeof userCreateSchema>) {
+  const p = userCreateSchema.parse(input);
+  await prisma.user.create({
+    data: {
+      name: p.name.trim(),
+      pinHash: await bcrypt.hash(p.password, 10),
+      role: p.role,
+      // admins implicitly have everything, so we don't store per-area grants
+      permissions: p.role === "admin" ? [] : p.permissions,
+      active: true,
+    },
+  });
+  revalidatePath("/settings/users");
+}
+
+const userUpdateSchema = z.object({
+  name: z.string().min(1),
+  role: roleEnum,
+  permissions: z.array(z.string()).default([]),
+  active: z.boolean().default(true),
+  password: z.string().optional(),
+});
+
+async function adminCount(activeOnly = true) {
+  return prisma.user.count({
+    where: { role: { in: ["admin", "owner"] }, ...(activeOnly ? { active: true } : {}) },
+  });
+}
+
+export async function updateUser(id: string, input: z.infer<typeof userUpdateSchema>) {
+  const p = userUpdateSchema.parse(input);
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) throw new Error("User not found");
+  const targetIsActiveAdmin =
+    (target.role === "admin" || target.role === "owner") && target.active;
+  // Don't let the last admin be demoted or deactivated.
+  if (targetIsActiveAdmin && (p.role !== "admin" || !p.active)) {
+    if ((await adminCount(true)) <= 1) throw new Error("This is the only admin - keep at least one.");
+  }
+  const data: {
+    name: string;
+    role: string;
+    permissions: string[];
+    active: boolean;
+    pinHash?: string;
+  } = {
+    name: p.name.trim(),
+    role: p.role,
+    permissions: p.role === "admin" ? [] : p.permissions,
+    active: p.active,
+  };
+  if (p.password && p.password.length >= 4) data.pinHash = await bcrypt.hash(p.password, 10);
+  await prisma.user.update({ where: { id }, data });
+  revalidatePath("/settings/users");
+}
+
+export async function deleteUser(id: string) {
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) return;
+  if (target.role === "admin" || target.role === "owner") {
+    if ((await adminCount(false)) <= 1) throw new Error("Can't delete the only admin.");
+  }
+  await prisma.user.delete({ where: { id } });
+  revalidatePath("/settings/users");
 }

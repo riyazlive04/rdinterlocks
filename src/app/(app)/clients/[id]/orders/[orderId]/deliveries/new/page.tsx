@@ -27,7 +27,7 @@ export default async function NewDeliveryPage({
   return (
     <>
       <PageHeader
-        title={`New delivery — ${order.client.name}`}
+        title={`New delivery - ${order.client.name}`}
         sub={`Order placed ${order.date.toDateString()}`}
         back={`/clients/${id}`}
       />

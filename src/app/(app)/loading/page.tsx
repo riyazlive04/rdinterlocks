@@ -8,7 +8,7 @@ import { DeleteLoading } from "./delete-button";
 export default async function LoadingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; loader?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; worker?: string }>;
 }) {
   const sp = await searchParams;
   const today = startOfDay();
@@ -16,23 +16,39 @@ export default async function LoadingPage({
   const to = sp?.to ? new Date(sp.to) : today;
   to.setHours(23, 59, 59, 999);
 
-  const [works, loaders] = await Promise.all([
+  // Filter param is "type:id" (e.g. "operator:abc"). Build the matching where.
+  const [wType, wId] = (sp?.worker ?? "").split(":");
+  const workerWhere =
+    wType && wId
+      ? wType === "loader"
+        ? { loaderId: wId }
+        : wType === "operator"
+          ? { operatorId: wId }
+          : { employeeId: wId }
+      : {};
+
+  const [works, loaders, operators, employees] = await Promise.all([
     prisma.loadingWork.findMany({
-      where: {
-        date: { gte: from, lte: to },
-        ...(sp?.loader ? { loaderId: sp.loader } : {}),
-      },
-      include: { loader: true, brickSize: true },
+      where: { date: { gte: from, lte: to }, ...workerWhere },
+      include: { loader: true, operator: true, employee: true, brickSize: true },
       orderBy: { date: "desc" },
     }),
     prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
   ]);
+
+  const workerGroups = [
+    { label: "Loaders", items: loaders.map((l) => ({ key: `loader:${l.id}`, name: l.name })) },
+    { label: "Operators", items: operators.map((o) => ({ key: `operator:${o.id}`, name: o.name })) },
+    { label: "Drivers & staff", items: employees.map((e) => ({ key: `employee:${e.id}`, name: e.name })) },
+  ].filter((g) => g.items.length > 0);
 
   return (
     <>
       <PageHeader
         title="Loading work"
-        sub="Loading wages — paid by piece rate"
+        sub="Loading wages - paid by piece rate"
         right={
           <Link
             href="/loading/new"
@@ -68,27 +84,34 @@ export default async function LoadingPage({
         </Card>
       </div>
 
-      <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
+      <div className="mb-4 space-y-2">
         <Link
           href="/loading"
-          className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
-            !sp?.loader ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
+          className={`inline-flex px-3 py-1.5 rounded-full text-[12px] font-semibold ${
+            !sp?.worker ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
           }`}
         >
-          All loaders
+          All workers
         </Link>
-        {loaders.map((l) => (
-          <Link
-            key={l.id}
-            href={`/loading?loader=${l.id}`}
-            className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
-              sp?.loader === l.id
-                ? "bg-ink text-white"
-                : "bg-white text-slate-700 border border-slate-200"
-            }`}
-          >
-            {l.name}
-          </Link>
+        {workerGroups.map((g) => (
+          <div key={g.label} className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 w-24 shrink-0">
+              {g.label}
+            </span>
+            {g.items.map((w) => (
+              <Link
+                key={w.key}
+                href={`/loading?worker=${w.key}`}
+                className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${
+                  sp?.worker === w.key
+                    ? "bg-ink text-white"
+                    : "bg-white text-slate-700 border border-slate-200"
+                }`}
+              >
+                {w.name}
+              </Link>
+            ))}
+          </div>
         ))}
       </div>
 
@@ -101,7 +124,7 @@ export default async function LoadingPage({
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <Th>Date</Th>
-                  <Th>Loader</Th>
+                  <Th>Worker</Th>
                   <Th>Size</Th>
                   <Th align="right">Bricks</Th>
                   <Th align="right">Rate</Th>
@@ -113,13 +136,24 @@ export default async function LoadingPage({
                 {works.map((w) => (
                   <tr key={w.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                     <Td>{formatShortDate(w.date)}</Td>
-                    <Td className="font-semibold">{w.loader.name}</Td>
-                    <Td>{w.brickSize?.label ?? "—"}</Td>
+                    <Td className="font-semibold">
+                      {w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-"}
+                    </Td>
+                    <Td>{w.brickSize?.label ?? "-"}</Td>
                     <Td align="right" className="num">{formatNumber(w.brickCount)}</Td>
                     <Td align="right" className="num">₹{w.ratePerBrick}</Td>
                     <Td align="right" className="num font-bold">{formatINR(w.totalAmount)}</Td>
                     <Td align="right">
-                      <DeleteLoading id={w.id} />
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/loading/${w.id}/edit`}
+                          className="w-8 h-8 rounded-md hover:bg-slate-100 inline-flex items-center justify-center text-slate-500"
+                          title="Edit"
+                        >
+                          <Icon.Pencil size={14} />
+                        </Link>
+                        <DeleteLoading id={w.id} />
+                      </div>
                     </Td>
                   </tr>
                 ))}

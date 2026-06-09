@@ -38,7 +38,7 @@ export async function createTipperLoad(input: z.infer<typeof schema>) {
         direction: p.rentDirection,
         source: "tipper",
         category: p.rentDirection === "in" ? "Tipper rent received" : "Tipper rent paid",
-        title: `${tipper.name} — ${p.toLocation ?? "load"}`,
+        title: `${tipper.name} - ${p.toLocation ?? "load"}`,
         notes: p.notes,
         method: p.method,
         tipperLoad: {

@@ -143,7 +143,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           id: r.id,
           cells: {
             time: `${String(r.date.getHours()).padStart(2, "0")}:${String(r.date.getMinutes()).padStart(2, "0")}`,
-            batch: r.batch?.code ?? "—",
+            batch: r.batch?.code ?? "-",
             size: r.brickSize.label,
             bricks: r.brickCount,
             cement: r.cementBagsUsed,
@@ -202,7 +202,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           ? d.order.payments[0].orderId
           : null;
         // For the per-delivery view we don't have allocation of the order's
-        // payments to this specific delivery — show line total and a
+        // payments to this specific delivery - show line total and a
         // "running" pending against the order as a hint.
         const orderItemsTotal = d.order ? d.order.payments.reduce((s) => s, 0) : 0;
         void orderTotal;
@@ -217,11 +217,11 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
               .map((i) => `${i.quantity.toLocaleString("en-IN")} × ${i.brickSize.label} ${i.constructionType.name}`)
               .join(", "),
             qty: d.items.reduce((s, i) => s + i.quantity, 0),
-            rate: d.items[0] ? `₹${d.items[0].pricePerBrick}` : "—",
+            rate: d.items[0] ? `₹${d.items[0].pricePerBrick}` : "-",
             amount: lineTotal,
             paid: orderPaid,
             pending: Math.max(0, lineTotal - orderPaid),
-            truck: d.truckPlate ?? "—",
+            truck: d.truckPlate ?? "-",
           },
           children: [],
         };
@@ -309,7 +309,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           cells: {
             title: e.title,
             category: e.category.name,
-            vendor: e.vendor?.name ?? "—",
+            vendor: e.vendor?.name ?? "-",
             notes: e.notes ?? "",
             amount: e.amount,
           },
@@ -350,9 +350,9 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           cells: {
             tipper: l.tipper.name,
             owner: l.tipper.ownership === "own" ? "RD" : l.vendor?.name ?? "vendor",
-            load: l.loadType === "bricks" ? `${l.brickSize?.label ?? "—"} bricks` : l.materialName ?? "Material",
+            load: l.loadType === "bricks" ? `${l.brickSize?.label ?? "-"} bricks` : l.materialName ?? "Material",
             qty: l.quantity,
-            route: `${l.fromLocation ?? "—"} → ${l.toLocation ?? "—"}`,
+            route: `${l.fromLocation ?? "-"} → ${l.toLocation ?? "-"}`,
             earned: l.rentDirection === "in" ? l.rentAmount : 0,
             paid: l.rentDirection === "out" ? l.rentAmount : 0,
           },
@@ -430,7 +430,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
     case "loading": {
       const rows = await prisma.loadingWork.findMany({
         where: { date: dateRange },
-        include: { loader: true, brickSize: true },
+        include: { loader: true, operator: true, employee: true, brickSize: true },
       });
       const moneyKeys = ["total"];
       const numberKeys = ["bricks"];
@@ -439,7 +439,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         (w) => ({
           id: w.id,
           cells: {
-            loader: w.loader.name,
+            loader: w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-",
             size: w.brickSize?.label ?? "Mixed",
             bricks: w.brickCount,
             rate: `₹${w.ratePerBrick}`,
@@ -455,7 +455,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         moneyKeys,
         numberKeys,
         columns: [
-          { key: "loader", header: "Loader", format: "text" },
+          { key: "loader", header: "Worker", format: "text" },
           { key: "size", header: "Size", format: "muted" },
           { key: "bricks", header: "Bricks", format: "number", align: "right" },
           { key: "rate", header: "Rate", format: "muted", align: "right", width: "60px" },
@@ -489,7 +489,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         ...advances.map((a) => ({
           id: a.id,
           date: a.date,
-          person: a.operator?.name ?? a.mason?.name ?? a.loader?.name ?? a.employee?.name ?? "—",
+          person: a.operator?.name ?? a.mason?.name ?? a.loader?.name ?? a.employee?.name ?? "-",
           role: a.personType,
           kind: "Advance",
           notes: a.notes ?? "",

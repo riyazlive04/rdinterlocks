@@ -13,7 +13,7 @@ export default async function ExpenseCategoriesPage() {
     <>
       <PageHeader
         title="Expense categories"
-        sub="Cement, Diesel, EB, Mould (Die), Tea, Wifi — admin can add anything"
+        sub="Cement, Diesel, EB, Mould (Die), Tea, Wifi - admin can add anything"
         back="/settings"
       />
       <MasterList

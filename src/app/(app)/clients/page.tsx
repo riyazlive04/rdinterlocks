@@ -25,6 +25,7 @@ export default async function ClientsPage({
         : {}),
     },
     include: {
+      payments: true,
       orders: {
         include: { items: true, payments: true, deliveries: { include: { items: true } } },
       },
@@ -101,7 +102,7 @@ export default async function ClientsPage({
                 <div className="flex-1 min-w-0">
                   <div className="text-[14px] font-bold text-ink">{c.name}</div>
                   <div className="text-[11px] text-slate-500 truncate">
-                    {c.location ?? "—"} {c.phone ? `· ${c.phone}` : ""}
+                    {c.location ?? "-"} {c.phone ? `· ${c.phone}` : ""}
                   </div>
                   <div className="flex gap-1.5 mt-1.5">
                     <Pill tone="slate">{c.orders.length} orders</Pill>

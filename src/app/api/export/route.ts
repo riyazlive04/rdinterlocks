@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const settings = await prisma.settings.findUnique({ where: { id: "default" } });
   const factoryName = settings?.factoryName ?? "RD Interlock Bricks";
-  const dateLabel = `${from.toDateString()} – ${to.toDateString()}`;
+  const dateLabel = `${from.toDateString()} - ${to.toDateString()}`;
   const safeName = `${data.title.replace(/[^a-z0-9]+/gi, "_")}_${from.toISOString().slice(0, 10)}_${to.toISOString().slice(0, 10)}`;
 
   // Flatten sections into rows for export (with date column injected at front)

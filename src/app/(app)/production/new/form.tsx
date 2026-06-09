@@ -28,35 +28,53 @@ export function ProductionForm({
   dayShiftRate,
   nightShiftRate,
   recipes,
+  initial,
+  submitLabel,
   onSubmit,
 }: {
-  sizes: Array<{ id: string; label: string }>;
+  sizes: Array<{ id: string; label: string; dayRate?: number; nightRate?: number }>;
   operators: Array<{ id: string; name: string }>;
   machines: Array<{ id: string; name: string }>;
   cementBagsPer1000: number;
   dayShiftRate: number;
   nightShiftRate: number;
   recipes: Record<string, Recipe[]>;
+  initial?: Partial<Sub>;
+  submitLabel?: string;
   onSubmit: (d: Sub) => Promise<void>;
 }) {
-  const [date, setDate] = useState(formatISODate(new Date()));
-  const [shift, setShift] = useState<"day" | "night">("day");
-  const [machineId, setMachineId] = useState(machines[0]?.id ?? "");
-  const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
-  const [brickCount, setBrickCount] = useState<number>(1000);
-  const [damagedCount, setDamagedCount] = useState<number>(0);
-  const [cementBags, setCementBags] = useState<number>(0);
-  const [cementAuto, setCementAuto] = useState(true);
-  const [ratePerBrick, setRatePerBrick] = useState<number>(dayShiftRate);
-  const [selected, setSelected] = useState<Set<string>>(new Set(operators.map((o) => o.id)));
-  const [notes, setNotes] = useState("");
+  const isEdit = !!initial;
+  // Effective operator rate for a size+shift: the size's own rate if set,
+  // otherwise the global day/night fallback.
+  const rateFor = (sizeId: string, sh: "day" | "night") => {
+    const s = sizes.find((x) => x.id === sizeId);
+    const r = sh === "day" ? s?.dayRate : s?.nightRate;
+    return r && r > 0 ? r : sh === "day" ? dayShiftRate : nightShiftRate;
+  };
+  const [date, setDate] = useState(initial?.date ?? formatISODate(new Date()));
+  const [shift, setShift] = useState<"day" | "night">(initial?.shift ?? "day");
+  const [machineId, setMachineId] = useState(initial?.machineId ?? machines[0]?.id ?? "");
+  const [brickSizeId, setBrickSizeId] = useState(initial?.brickSizeId ?? sizes[0]?.id ?? "");
+  const [brickCount, setBrickCount] = useState<number>(initial?.brickCount ?? 1000);
+  const [damagedCount, setDamagedCount] = useState<number>(initial?.damagedCount ?? 0);
+  const [cementBags, setCementBags] = useState<number>(initial?.cementBagsUsed ?? 0);
+  // When editing, start with manual cement so we don't overwrite the saved value.
+  const [cementAuto, setCementAuto] = useState(!isEdit);
+  const [ratePerBrick, setRatePerBrick] = useState<number>(initial?.ratePerBrick ?? dayShiftRate);
+  const [selected, setSelected] = useState<Set<string>>(
+    new Set(initial?.operatorIds ?? operators.map((o) => o.id))
+  );
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // Auto-shift rate
+  // Auto rate from the selected size + shift - only on a fresh entry;
+  // preserve the saved rate when editing.
   useEffect(() => {
-    setRatePerBrick(shift === "day" ? dayShiftRate : nightShiftRate);
-  }, [shift, dayShiftRate, nightShiftRate]);
+    if (isEdit) return;
+    setRatePerBrick(rateFor(brickSizeId, shift));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shift, brickSizeId, dayShiftRate, nightShiftRate, isEdit]);
 
   // Auto-cement
   useEffect(() => {
@@ -150,7 +168,7 @@ export function ProductionForm({
           {machines.length > 0 && (
             <Field label="Machine">
               <Select value={machineId} onChange={(e) => setMachineId(e.target.value)}>
-                <option value="">— none —</option>
+                <option value="">- none -</option>
                 {machines.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name}
@@ -220,7 +238,7 @@ export function ProductionForm({
           </Field>
           <Field
             label="Damaged bricks (tracked separately)"
-            hint="Recorded for waste tracking — does not reduce production count or wage."
+            hint="Recorded for waste tracking - does not reduce production count or wage."
           >
             <Input
               type="number"
@@ -370,8 +388,8 @@ export function ProductionForm({
         )}
       </Card>
 
-      {/* Sticky bottom CTA */}
-      <div className="fixed left-0 md:left-60 lg:left-64 right-0 bottom-0 md:bottom-0 z-20 bg-white border-t border-slate-200 px-4 md:px-8 py-3 pb-20 md:pb-3">
+      {/* Sticky bottom CTA — sits above the mobile bottom nav (which is z-30) */}
+      <div className="fixed left-0 md:left-60 lg:left-64 right-0 bottom-[60px] md:bottom-0 z-40 bg-white border-t border-slate-200 px-4 md:px-8 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-3">
         {error && <div className="text-xs text-red-600 mb-2">{error}</div>}
         <div className="max-w-screen-xl mx-auto flex items-center justify-between gap-3">
           <div className="text-[12px] text-slate-500 hidden sm:block">
@@ -384,7 +402,7 @@ export function ProductionForm({
             )}
           </div>
           <Button onClick={submit} disabled={isPending} variant="primary" size="lg" className="ml-auto">
-            {isPending ? "Saving…" : "Save production entry"}
+            {isPending ? "Saving…" : submitLabel ?? "Save production entry"}
           </Button>
         </div>
       </div>

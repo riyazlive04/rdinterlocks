@@ -11,7 +11,7 @@ export function DeleteCashEntry({ id, canDelete }: { id: string; canDelete: bool
     return (
       <span
         className="w-7 h-7 rounded-md flex items-center justify-center text-slate-300 cursor-not-allowed"
-        title="Auto-generated — delete from its source page"
+        title="Auto-generated - delete from its source page"
       >
         <Icon.Trash size={14} />
       </span>

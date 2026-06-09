@@ -16,7 +16,7 @@ export default async function NewOrderPage({ params }: { params: Promise<{ id: s
   if (sizes.length === 0 || ctypes.length === 0) {
     return (
       <>
-        <PageHeader title={`New order — ${client.name}`} back={`/clients/${id}`} />
+        <PageHeader title={`New order - ${client.name}`} back={`/clients/${id}`} />
         <Card>
           <div className="p-6 text-center text-sm text-slate-500">
             Add brick sizes and construction types in Settings before creating orders.
@@ -27,7 +27,7 @@ export default async function NewOrderPage({ params }: { params: Promise<{ id: s
   }
   return (
     <>
-      <PageHeader title={`New order — ${client.name}`} back={`/clients/${id}`} />
+      <PageHeader title={`New order - ${client.name}`} back={`/clients/${id}`} />
       <OrderForm
         clientId={id}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}

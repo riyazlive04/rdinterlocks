@@ -39,7 +39,7 @@ export async function giveEmployeeAdvance(input: z.infer<typeof advanceSchema>) 
       direction: "out",
       source: "advance",
       category: "Employee advance",
-      title: `${emp.name} — advance`,
+      title: `${emp.name} - advance`,
       notes: p.notes,
       method: p.method,
       advance: {
@@ -84,7 +84,7 @@ export async function recordPayout(input: z.infer<typeof payoutSchema>) {
       direction: "out",
       source: "wage",
       category: "Salary",
-      title: `${emp.name} — salary`,
+      title: `${emp.name} - salary`,
       notes: p.notes,
       method: p.method,
       employeePayout: {
@@ -117,7 +117,7 @@ export async function recordPayout(input: z.infer<typeof payoutSchema>) {
         await prisma.advance.update({ where: { id: a.id }, data: { settled: true } });
         remaining -= a.amount;
       } else {
-        // partial — leave rest unsettled
+        // partial - leave rest unsettled
         remaining = 0;
       }
     }

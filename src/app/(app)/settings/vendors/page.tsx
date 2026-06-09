@@ -7,7 +7,7 @@ export default async function VendorsPage() {
   const rows = await prisma.vendor.findMany({ where: { active: true }, orderBy: { name: "asc" } });
   return (
     <>
-      <PageHeader title="Vendors" sub="Outside parties — AVM tipper, raw material suppliers, etc." back="/settings" />
+      <PageHeader title="Vendors" sub="Outside parties - AVM tipper, raw material suppliers, etc." back="/settings" />
       <MasterList
         rows={rows.map((r) => ({ id: r.id, name: r.name, phone: r.phone ?? "", notes: r.notes ?? "" }))}
         fields={[

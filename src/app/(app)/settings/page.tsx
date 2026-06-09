@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui";
 import { Icon, IconName } from "@/components/icons";
+import { requireAdmin } from "@/lib/auth";
 
 const sections: Array<{
   group: string;
@@ -10,14 +11,15 @@ const sections: Array<{
     group: "Factory",
     items: [
       { href: "/settings/factory", label: "Factory profile", sub: "Name, address, phone, GST", icon: "Building" },
+      { href: "/settings/users", label: "Users & access", sub: "Add logins, choose what each can see", icon: "Workers" },
       { href: "/settings/security", label: "Security", sub: "Change password", icon: "Settings" },
     ],
   },
   {
     group: "Pricing",
     items: [
-      { href: "/settings/brick-sizes", label: "Brick sizes", sub: '6", 6"H, 8" — add/edit', icon: "Brick" },
-      { href: "/settings/construction-types", label: "Construction types", sub: "Room, Compound, Godown — add more", icon: "Building" },
+      { href: "/settings/brick-sizes", label: "Brick sizes", sub: '6", 6"H, 8" - add/edit', icon: "Brick" },
+      { href: "/settings/construction-types", label: "Construction types", sub: "Room, Compound, Godown - add more", icon: "Building" },
       { href: "/settings/price-matrix", label: "Price matrix", sub: "Sell price + mason rate per size × type", icon: "Tag" },
     ],
   },
@@ -46,12 +48,13 @@ const sections: Array<{
   },
 ];
 
-export default function SettingsHub() {
+export default async function SettingsHub() {
+  await requireAdmin();
   return (
     <>
       <PageHeader
         title="Settings"
-        sub="Master data — admin can add or change anything"
+        sub="Master data - admin can add or change anything"
       />
       <div className="space-y-6">
         {sections.map((s) => (
