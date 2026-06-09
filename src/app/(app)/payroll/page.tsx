@@ -5,7 +5,8 @@ import { requireArea } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import { formatINR } from "@/lib/format";
 import { PayrollAdvanceForm } from "./advance-form";
-import { createWorkerAdvance } from "./actions";
+import { SettleButton } from "./settle-button";
+import { createWorkerAdvance, payWorker } from "./actions";
 
 const monthNames = [
   "January", "February", "March", "April", "May", "June",
@@ -36,7 +37,16 @@ function monthBounds(monthParam?: string) {
   };
 }
 
-type Row = { id: string; name: string; earned: number; advances: number; paid: number };
+type PersonType = "operator" | "mason" | "loader" | "employee";
+type Row = {
+  id: string;
+  name: string;
+  personType: PersonType;
+  earned: number;
+  advances: number;
+  paid: number;
+  openAdvances: number;
+};
 
 export default async function PayrollPage({
   searchParams,
@@ -48,7 +58,8 @@ export default async function PayrollPage({
   const { start, end, label, prev, next } = monthBounds(sp?.month);
   const range = { gte: start, lte: end };
 
-  const [operators, masons, loaders, employees, openAdvances, payouts] = await Promise.all([
+  const [operators, masons, loaders, employees, periodAdvances, openAdvances, workerPayouts, payouts] =
+    await Promise.all([
     prisma.operator.findMany({
       where: { active: true },
       include: {
@@ -75,35 +86,48 @@ export default async function PayrollPage({
       },
       orderBy: { name: "asc" },
     }),
-    prisma.advance.findMany({ where: { settled: false } }),
+    prisma.advance.findMany({ where: { date: range } }),
+    prisma.advance.findMany({ where: { date: range, settled: false } }),
+    prisma.workerPayout.findMany({ where: { date: range } }),
     prisma.employeePayout.findMany({ where: { date: range } }),
   ]);
 
-  const advanceFor = (key: "operatorId" | "masonId" | "loaderId" | "employeeId", id: string) =>
+  type Fk = "operatorId" | "masonId" | "loaderId" | "employeeId";
+  const advanceFor = (key: Fk, id: string) =>
+    periodAdvances.filter((a) => a[key] === id).reduce((s, a) => s + a.amount, 0);
+  const openAdvanceFor = (key: Fk, id: string) =>
     openAdvances.filter((a) => a[key] === id).reduce((s, a) => s + a.amount, 0);
+  const workerPaidFor = (key: Fk, id: string) =>
+    workerPayouts.filter((p) => p[key] === id).reduce((s, p) => s + p.netPaid, 0);
 
   const operatorRows: Row[] = operators.map((o) => ({
     id: o.id,
     name: o.name,
+    personType: "operator",
     earned:
       o.productionShares.reduce((s, x) => s + x.amount, 0) +
       o.loadingWorks.reduce((s, w) => s + w.totalAmount, 0),
     advances: advanceFor("operatorId", o.id),
-    paid: 0,
+    paid: workerPaidFor("operatorId", o.id),
+    openAdvances: openAdvanceFor("operatorId", o.id),
   }));
   const masonRows: Row[] = masons.map((m) => ({
     id: m.id,
     name: m.name,
+    personType: "mason",
     earned: m.works.reduce((s, w) => s + w.totalAmount, 0),
     advances: advanceFor("masonId", m.id),
-    paid: 0,
+    paid: workerPaidFor("masonId", m.id),
+    openAdvances: openAdvanceFor("masonId", m.id),
   }));
   const loaderRows: Row[] = loaders.map((l) => ({
     id: l.id,
     name: l.name,
+    personType: "loader",
     earned: l.works.reduce((s, w) => s + w.totalAmount, 0),
     advances: advanceFor("loaderId", l.id),
-    paid: 0,
+    paid: workerPaidFor("loaderId", l.id),
+    openAdvances: openAdvanceFor("loaderId", l.id),
   }));
   const employeeRows: Row[] = employees.map((e) => {
     const present = e.attendance.filter((a) => a.status === "present").length;
@@ -115,15 +139,19 @@ export default async function PayrollPage({
           ? e.payRate * (present + half * 0.5)
           : 0;
     const loadingEarned = e.loadingWorks.reduce((s, w) => s + w.totalAmount, 0);
-    const paid = payouts
-      .filter((p) => p.employeeId === e.id)
-      .reduce((s, p) => s + p.netPaid, 0);
+    // Employees can be paid from their own page (EmployeePayout) OR here
+    // (WorkerPayout) — count both so "paid" is accurate either way.
+    const paid =
+      payouts.filter((p) => p.employeeId === e.id).reduce((s, p) => s + p.netPaid, 0) +
+      workerPaidFor("employeeId", e.id);
     return {
       id: e.id,
       name: e.name,
+      personType: "employee",
       earned: earned + loadingEarned,
       advances: advanceFor("employeeId", e.id),
       paid,
+      openAdvances: openAdvanceFor("employeeId", e.id),
     };
   });
 
@@ -213,8 +241,9 @@ export default async function PayrollPage({
                           <Th>Name</Th>
                           <Th align="right">Earned</Th>
                           <Th align="right">Advances</Th>
-                          {sec.linkBase ? <Th align="right">Paid</Th> : null}
+                          <Th align="right">Paid</Th>
                           <Th align="right">Net payable</Th>
+                          <Th align="right">Action</Th>
                         </tr>
                       </thead>
                       <tbody>
@@ -233,12 +262,26 @@ export default async function PayrollPage({
                             <Td align="right" className="num text-amber-700">
                               {r.advances > 0 ? `−${formatINR(r.advances)}` : "—"}
                             </Td>
-                            {sec.linkBase ? (
-                              <Td align="right" className="num text-emerald-700">
-                                {r.paid > 0 ? formatINR(r.paid) : "—"}
-                              </Td>
-                            ) : null}
+                            <Td align="right" className="num text-emerald-700">
+                              {r.paid > 0 ? formatINR(r.paid) : "—"}
+                            </Td>
                             <Td align="right" className="num font-bold">{formatINR(net(r))}</Td>
+                            <Td align="right">
+                              {net(r) > 0 || r.openAdvances > 0 ? (
+                                <SettleButton
+                                  personType={r.personType}
+                                  personId={r.id}
+                                  name={r.name}
+                                  earned={r.earned}
+                                  advances={r.advances}
+                                  paid={r.paid}
+                                  openAdvances={r.openAdvances}
+                                  onSubmit={payWorker}
+                                />
+                              ) : (
+                                <span className="text-[11px] text-slate-400">Settled</span>
+                              )}
+                            </Td>
                           </tr>
                         ))}
                       </tbody>

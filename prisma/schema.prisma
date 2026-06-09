@@ -149,6 +149,7 @@ model Operator {
   productionShares ProductionShare[]
   advances         Advance[]
   loadingWorks     LoadingWork[]
+  payouts          WorkerPayout[]
 }
 
 model Mason {
@@ -160,6 +161,7 @@ model Mason {
 
   works    MasonWork[]
   advances Advance[]
+  payouts  WorkerPayout[]
 }
 
 model Loader {
@@ -171,6 +173,7 @@ model Loader {
 
   works    LoadingWork[]
   advances Advance[]
+  payouts  WorkerPayout[]
 }
 
 model Employee {
@@ -187,6 +190,7 @@ model Employee {
   advances   Advance[]
   payouts    EmployeePayout[]
   loadingWorks LoadingWork[]
+  workerPayouts WorkerPayout[]
 }
 
 model Vendor {
@@ -482,6 +486,32 @@ model EmployeePayout {
   cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
 }
 
+// Generic wage/salary payout for ANY worker type (operator, mason, loader,
+// employee). Mirrors EmployeePayout but works for everyone, so the payroll
+// screen can settle anyone in one place. (EmployeePayout is kept for the
+// existing employee-page flow; payroll sums both.)
+model WorkerPayout {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  personType  String   // operator | mason | loader | employee
+  operatorId  String?
+  operator    Operator? @relation(fields: [operatorId], references: [id])
+  masonId     String?
+  mason       Mason?    @relation(fields: [masonId], references: [id])
+  loaderId    String?
+  loader      Loader?   @relation(fields: [loaderId], references: [id])
+  employeeId  String?
+  employee    Employee? @relation(fields: [employeeId], references: [id])
+  earned          Float @default(0) // earned in the period (snapshot)
+  advancesSettled Float @default(0) // advance deducted in this payout
+  netPaid         Float            // cash actually handed over
+  notes       String?
+  cashEntryId String?  @unique
+  cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
+
+  @@index([date])
+}
+
 // ─── Generic Advance (any person type) ────────────────────────────────
 
 model Advance {
@@ -526,6 +556,7 @@ model CashEntry {
   advance       Advance?
   clientPayment ClientPayment?
   employeePayout EmployeePayout?
+  workerPayout  WorkerPayout?
 
   @@index([date])
 }

@@ -3,8 +3,9 @@ import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { requireArea } from "@/lib/auth";
 import { Icon } from "@/components/icons";
-import { formatINR, formatShortDate, startOfDay, startOfMonth } from "@/lib/format";
+import { formatINR, formatISODate, formatShortDate, startOfDay, startOfMonth } from "@/lib/format";
 import { DeleteCashEntry } from "./delete-button";
+import { CashDateFilter } from "./date-filter";
 
 export default async function CashbookPage({
   searchParams,
@@ -81,6 +82,12 @@ export default async function CashbookPage({
           </div>
         </Card>
       </div>
+
+      <CashDateFilter
+        params={{ direction: sp?.direction, source: sp?.source }}
+        from={formatISODate(from)}
+        to={formatISODate(to)}
+      />
 
       <div className="flex flex-wrap gap-1.5 mb-4">
         {[
