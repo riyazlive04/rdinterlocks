@@ -18,13 +18,15 @@ export function MobileTopBar() {
         </span>
       </Link>
       {pathname !== "/menu" && (
-        <Link
-          href="/logout"
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500"
-          aria-label="Logout"
-        >
-          <Icon.Logout size={16} />
-        </Link>
+        <form action="/logout" method="post" className="contents">
+          <button
+            type="submit"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500"
+            aria-label="Logout"
+          >
+            <Icon.Logout size={16} />
+          </button>
+        </form>
       )}
     </div>
   );

@@ -27,15 +27,17 @@ export default async function MenuPage() {
               </Link>
             );
           })}
-        <Link
-          href="/logout"
-          className="bg-white rounded-2xl p-4 border border-slate-200 hover:border-red-300 transition flex flex-col items-start gap-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-brand-redLight flex items-center justify-center">
-            <Icon.Logout size={20} color="#E11D2C" />
-          </div>
-          <div className="text-[14px] font-bold text-brand-red">Logout</div>
-        </Link>
+        <form action="/logout" method="post" className="contents">
+          <button
+            type="submit"
+            className="bg-white rounded-2xl p-4 border border-slate-200 hover:border-red-300 transition flex flex-col items-start gap-3 text-left"
+          >
+            <div className="w-10 h-10 rounded-xl bg-brand-redLight flex items-center justify-center">
+              <Icon.Logout size={20} color="#E11D2C" />
+            </div>
+            <div className="text-[14px] font-bold text-brand-red">Logout</div>
+          </button>
+        </form>
       </div>
     </>
   );

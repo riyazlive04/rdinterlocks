@@ -73,13 +73,15 @@ export function Sidebar({
             <div className="text-[13px] font-semibold text-ink truncate">{userName}</div>
             <div className="text-[10px] text-slate-500 uppercase tracking-wider">{role}</div>
           </div>
-          <Link
-            href="/logout"
-            className="text-slate-500 hover:text-ink p-1.5 rounded-md hover:bg-slate-100"
-            aria-label="Logout"
-          >
-            <Icon.Logout size={16} />
-          </Link>
+          <form action="/logout" method="post" className="contents">
+            <button
+              type="submit"
+              className="text-slate-500 hover:text-ink p-1.5 rounded-md hover:bg-slate-100"
+              aria-label="Logout"
+            >
+              <Icon.Logout size={16} />
+            </button>
+          </form>
         </div>
       </div>
     </aside>
