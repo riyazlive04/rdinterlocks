@@ -8,13 +8,14 @@ import { distributeInt } from "@/lib/distribute";
 
 type WorkerType = "loader" | "operator" | "employee";
 type WorkerOption = { type: WorkerType; id: string; name: string };
+type Mode = "loading" | "unloading" | "both";
 
 type Crew = { workers: Array<{ type: WorkerType; id: string }>; ratePerBrick: number };
 type Sub = {
   date: string;
   brickSizeId?: string;
   brickCount: number;
-  loading: Crew;
+  loading?: Crew;
   unloading?: Crew;
 };
 
@@ -34,15 +35,25 @@ export function LoadingMultiForm({
   const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
   const [brickCount, setBrickCount] = useState<number>(1000);
 
+  const [mode, setMode] = useState<Mode>("loading");
   const [loadSel, setLoadSel] = useState<Set<string>>(new Set());
   const [loadRate, setLoadRate] = useState<number>(0.5);
-
-  const [doUnload, setDoUnload] = useState(false);
   const [unloadSel, setUnloadSel] = useState<Set<string>>(new Set());
   const [unloadRate, setUnloadRate] = useState<number>(0.5);
 
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const showLoad = mode !== "unloading";
+  const showUnload = mode !== "loading";
+
+  const changeMode = (m: Mode) => {
+    setMode(m);
+    // When "both", pre-fill the unloading crew from the loading crew (editable).
+    if (m === "both" && unloadSel.size === 0 && loadSel.size > 0) {
+      setUnloadSel(new Set(loadSel));
+    }
+  };
 
   const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (k: string) =>
     setter((s) => {
@@ -51,12 +62,6 @@ export function LoadingMultiForm({
       else n.add(k);
       return n;
     });
-
-  const enableUnload = (on: boolean) => {
-    setDoUnload(on);
-    // Pre-fill the unloading crew from the loading crew - editable afterwards.
-    if (on && unloadSel.size === 0) setUnloadSel(new Set(loadSel));
-  };
 
   const workersFor = (sel: Set<string>) => all.filter((w) => sel.has(keyOf(w)));
 
@@ -138,33 +143,29 @@ export function LoadingMultiForm({
   };
 
   const grandTotal = useMemo(() => {
-    const load = Math.round((brickCount || 0) * (loadRate || 0));
-    const unload = doUnload ? Math.round((brickCount || 0) * (unloadRate || 0)) : 0;
+    const load = showLoad ? Math.round((brickCount || 0) * (loadRate || 0)) : 0;
+    const unload = showUnload ? Math.round((brickCount || 0) * (unloadRate || 0)) : 0;
     return load + unload;
-  }, [brickCount, loadRate, doUnload, unloadRate]);
+  }, [brickCount, loadRate, unloadRate, showLoad, showUnload]);
 
   const submit = () => {
     setError(null);
-    if (loadSel.size === 0) return setError("Pick at least one person who loaded");
     if (brickCount <= 0) return setError("Brick count must be more than 0");
-    if (loadRate <= 0) return setError("Loading rate must be more than 0");
-    if (doUnload && unloadSel.size === 0) return setError("Pick who unloaded, or turn off unloading");
-    if (doUnload && unloadRate <= 0) return setError("Unloading rate must be more than 0");
+    if (showLoad && loadSel.size === 0) return setError("Pick at least one person who loaded");
+    if (showLoad && loadRate <= 0) return setError("Loading rate must be more than 0");
+    if (showUnload && unloadSel.size === 0) return setError("Pick at least one person who unloaded");
+    if (showUnload && unloadRate <= 0) return setError("Unloading rate must be more than 0");
     startTransition(async () => {
       try {
         await onSubmit({
           date,
           brickSizeId: brickSizeId || undefined,
           brickCount,
-          loading: {
-            workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })),
-            ratePerBrick: loadRate,
-          },
-          unloading: doUnload
-            ? {
-                workers: workersFor(unloadSel).map((w) => ({ type: w.type, id: w.id })),
-                ratePerBrick: unloadRate,
-              }
+          loading: showLoad
+            ? { workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: loadRate }
+            : undefined,
+          unloading: showUnload
+            ? { workers: workersFor(unloadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: unloadRate }
             : undefined,
         });
       } catch (e) {
@@ -174,8 +175,33 @@ export function LoadingMultiForm({
     });
   };
 
+  const modeBtn = (m: Mode, label: string) => (
+    <button
+      type="button"
+      onClick={() => changeMode(m)}
+      className={clsx(
+        "flex-1 px-3 py-2 rounded-lg text-[12px] font-semibold transition",
+        mode === m ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
+      )}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <Card>
+      <div className="flex gap-1.5 mb-4">
+        {modeBtn("loading", "Loading")}
+        {modeBtn("unloading", "Unloading")}
+        {modeBtn("both", "Both")}
+      </div>
+      {mode === "unloading" && (
+        <div className="text-[11px] text-slate-500 -mt-2 mb-3">
+          Use this to add unloading for a load you already saved - it doesn&apos;t add to the brick
+          count, only the unloading salary.
+        </div>
+      )}
+
       <div className="grid sm:grid-cols-3 gap-3">
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -199,67 +225,59 @@ export function LoadingMultiForm({
         </Field>
       </div>
 
-      {/* Loading crew */}
-      <div className="mt-4 pt-3 border-t border-slate-100">
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
-            Loading · {loadSel.size} selected
-          </div>
-          <div className="w-32">
-            <Field label="Rate ₹/brick">
-              <Input
-                type="number"
-                step="0.1"
-                value={loadRate}
-                onChange={(e) => setLoadRate(Number(e.target.value || 0))}
-              />
-            </Field>
-          </div>
-        </div>
-        {groupSelector(loadSel, toggle(setLoadSel))}
-        {splitTable(loadSel, loadRate)}
-      </div>
-
-      {/* Unloading crew (optional) */}
-      <div className="mt-4 pt-3 border-t border-slate-100">
-        <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
-          <input
-            type="checkbox"
-            checked={doUnload}
-            onChange={(e) => enableUnload(e.target.checked)}
-            className="w-4 h-4 accent-brand-red"
-          />
-          <span className="text-[12px] font-bold uppercase tracking-wider text-ink">
-            Record unloading separately
-          </span>
-        </label>
-        {doUnload && (
-          <>
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-[11px] text-slate-500">
-                Same bricks ({formatNumber(brickCount || 0)}) - deselect or add people who unloaded.
-              </div>
-              <div className="w-32">
-                <Field label="Rate ₹/brick">
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={unloadRate}
-                    onChange={(e) => setUnloadRate(Number(e.target.value || 0))}
-                  />
-                </Field>
-              </div>
+      {showLoad && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
+              Loading · {loadSel.size} selected
             </div>
-            {groupSelector(unloadSel, toggle(setUnloadSel))}
-            {splitTable(unloadSel, unloadRate)}
-          </>
-        )}
-      </div>
+            <div className="w-32">
+              <Field label="Rate ₹/brick">
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={loadRate}
+                  onChange={(e) => setLoadRate(Number(e.target.value || 0))}
+                />
+              </Field>
+            </div>
+          </div>
+          {groupSelector(loadSel, toggle(setLoadSel))}
+          {splitTable(loadSel, loadRate)}
+        </div>
+      )}
+
+      {showUnload && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
+              Unloading · {unloadSel.size} selected
+            </div>
+            <div className="w-32">
+              <Field label="Rate ₹/brick">
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={unloadRate}
+                  onChange={(e) => setUnloadRate(Number(e.target.value || 0))}
+                />
+              </Field>
+            </div>
+          </div>
+          {mode === "both" && (
+            <div className="text-[11px] text-slate-500 mb-2">
+              Pre-filled from the loading crew - deselect or add the people who unloaded.
+            </div>
+          )}
+          {groupSelector(unloadSel, toggle(setUnloadSel))}
+          {splitTable(unloadSel, unloadRate)}
+        </div>
+      )}
 
       <div className="mt-4 flex items-center justify-between">
         <div className="text-[12px] text-slate-500">
           Total salary <span className="num font-bold text-ink">{formatINR(grandTotal)}</span>
-          {doUnload && <span className="text-slate-400"> (loading + unloading)</span>}
+          {mode === "both" && <span className="text-slate-400"> (loading + unloading)</span>}
         </div>
       </div>
 

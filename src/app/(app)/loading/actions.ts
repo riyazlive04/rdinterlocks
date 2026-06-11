@@ -26,13 +26,17 @@ const crewSchema = z.object({
   workers: z.array(z.object({ type: workerType, id: z.string().min(1) })).min(1),
   ratePerBrick: z.number().positive(),
 });
-const createSchema = z.object({
-  date: z.string(),
-  brickSizeId: z.string().optional(),
-  brickCount: z.number().int().positive(),
-  loading: crewSchema,
-  unloading: crewSchema.optional(),
-});
+const createSchema = z
+  .object({
+    date: z.string(),
+    brickSizeId: z.string().optional(),
+    brickCount: z.number().int().positive(),
+    loading: crewSchema.optional(),
+    unloading: crewSchema.optional(),
+  })
+  .refine((d) => d.loading || d.unloading, {
+    message: "Pick a loading crew, an unloading crew, or both",
+  });
 
 export async function createLoadingWork(input: z.infer<typeof createSchema>) {
   const p = createSchema.parse(input);
@@ -58,7 +62,8 @@ export async function createLoadingWork(input: z.infer<typeof createSchema>) {
     );
   };
 
-  const ops = [...rowsFor(p.loading, "loading")];
+  const ops = [];
+  if (p.loading) ops.push(...rowsFor(p.loading, "loading"));
   if (p.unloading) ops.push(...rowsFor(p.unloading, "unloading"));
   await prisma.$transaction(ops);
 
