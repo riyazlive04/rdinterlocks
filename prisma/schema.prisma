@@ -347,6 +347,7 @@ model MasonWork {
 model LoadingWork {
   id           String   @id @default(cuid())
   date         DateTime @default(now())
+  phase        String   @default("loading") // loading | unloading
   workerType   String   @default("loader") // loader | operator | employee
   loaderId     String?
   loader       Loader?   @relation(fields: [loaderId], references: [id])

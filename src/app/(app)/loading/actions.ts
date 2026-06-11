@@ -18,34 +18,50 @@ function workerData(type: "loader" | "operator" | "employee", id: string) {
   };
 }
 
-// Create: one or more workers share the total bricks (split evenly, remainder
-// to the first). Each worker becomes its own LoadingWork row.
+// One physical load of bricks is recorded as a LOADING crew and an optional
+// UNLOADING crew (different people / rate). Both crews split the SAME brick
+// count, so bricks aren't double-counted (the list counts the loading phase
+// only); each crew is paid separately. Each worker becomes its own row.
+const crewSchema = z.object({
+  workers: z.array(z.object({ type: workerType, id: z.string().min(1) })).min(1),
+  ratePerBrick: z.number().positive(),
+});
 const createSchema = z.object({
   date: z.string(),
-  workers: z.array(z.object({ type: workerType, id: z.string().min(1) })).min(1),
   brickSizeId: z.string().optional(),
   brickCount: z.number().int().positive(),
-  ratePerBrick: z.number().positive(),
+  loading: crewSchema,
+  unloading: crewSchema.optional(),
 });
 
 export async function createLoadingWork(input: z.infer<typeof createSchema>) {
   const p = createSchema.parse(input);
   const date = new Date(p.date);
-  const shares = distributeInt(p.brickCount, p.workers.length);
-  await prisma.$transaction(
-    p.workers.map((w, i) =>
+
+  const rowsFor = (
+    crew: z.infer<typeof crewSchema>,
+    phase: "loading" | "unloading"
+  ) => {
+    const shares = distributeInt(p.brickCount, crew.workers.length);
+    return crew.workers.map((w, i) =>
       prisma.loadingWork.create({
         data: {
           date,
+          phase,
           ...workerData(w.type, w.id),
           brickSizeId: p.brickSizeId || null,
           brickCount: shares[i],
-          ratePerBrick: p.ratePerBrick,
-          totalAmount: shares[i] * p.ratePerBrick,
+          ratePerBrick: crew.ratePerBrick,
+          totalAmount: shares[i] * crew.ratePerBrick,
         },
       })
-    )
-  );
+    );
+  };
+
+  const ops = [...rowsFor(p.loading, "loading")];
+  if (p.unloading) ops.push(...rowsFor(p.unloading, "unloading"));
+  await prisma.$transaction(ops);
+
   revalidatePath("/loading");
   redirect("/loading");
 }

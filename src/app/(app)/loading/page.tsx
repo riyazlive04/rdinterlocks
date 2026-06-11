@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { Card, PageHeader, EmptyState } from "@/components/ui";
+import { Card, PageHeader, EmptyState, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate, startOfDay } from "@/lib/format";
 import { DeleteLoading } from "./delete-button";
@@ -62,10 +62,12 @@ export default async function LoadingPage({
       <div className="grid sm:grid-cols-3 gap-3 mb-5">
         <Card padding="tight">
           <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-            Bricks loaded
+            Bricks handled
           </div>
           <div className="num display text-xl font-bold mt-0.5">
-            {formatNumber(works.reduce((s, w) => s + w.brickCount, 0))}
+            {formatNumber(
+              works.filter((w) => w.phase !== "unloading").reduce((s, w) => s + w.brickCount, 0)
+            )}
           </div>
         </Card>
         <Card padding="tight">
@@ -125,6 +127,7 @@ export default async function LoadingPage({
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <Th>Date</Th>
                   <Th>Worker</Th>
+                  <Th>Phase</Th>
                   <Th>Size</Th>
                   <Th align="right">Bricks</Th>
                   <Th align="right">Rate</Th>
@@ -138,6 +141,11 @@ export default async function LoadingPage({
                     <Td>{formatShortDate(w.date)}</Td>
                     <Td className="font-semibold">
                       {w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-"}
+                    </Td>
+                    <Td>
+                      <Pill tone={w.phase === "unloading" ? "warning" : "slate"}>
+                        {w.phase === "unloading" ? "Unloading" : "Loading"}
+                      </Pill>
                     </Td>
                     <Td>{w.brickSize?.label ?? "-"}</Td>
                     <Td align="right" className="num">{formatNumber(w.brickCount)}</Td>

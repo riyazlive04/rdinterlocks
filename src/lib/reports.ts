@@ -439,9 +439,13 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         (w) => ({
           id: w.id,
           cells: {
-            loader: w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-",
+            loader:
+              (w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-") +
+              (w.phase === "unloading" ? " · unload" : ""),
             size: w.brickSize?.label ?? "Mixed",
-            bricks: w.brickCount,
+            // Unloading reuses the same bricks - count them once (on loading)
+            // so the report's brick total isn't doubled.
+            bricks: w.phase === "unloading" ? 0 : w.brickCount,
             rate: `₹${w.ratePerBrick}`,
             total: w.totalAmount,
           },
