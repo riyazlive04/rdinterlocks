@@ -35,17 +35,40 @@ export async function createManualCashEntry(input: z.infer<typeof schema>) {
 }
 
 export async function deleteCashEntry(id: string) {
-  // Only allow deleting manual entries - auto entries should be deleted via their source
-  const entry = await prisma.cashEntry.findUnique({ where: { id } });
+  // Delete the cash entry AND its linked source record (client payment,
+  // expense, advance, payout, tipper rent) so a wrongly double-entered row can
+  // be fully removed without leaving an orphaned record. Manual entries have no
+  // linked record, so only the cash row is removed.
+  const entry = await prisma.cashEntry.findUnique({
+    where: { id },
+    include: {
+      expense: true,
+      tipperLoad: true,
+      advance: true,
+      clientPayment: true,
+      employeePayout: true,
+      workerPayout: true,
+    },
+  });
   if (!entry) return;
-  if (entry.source !== "manual") {
-    throw new Error(
-      "This entry was created by a " +
-        entry.source +
-        " - delete it from that page to keep records consistent."
-    );
-  }
-  await prisma.cashEntry.delete({ where: { id } });
+
+  await prisma.$transaction(async (tx) => {
+    // Remove the source record first - it holds the cashEntryId foreign key.
+    if (entry.expense) await tx.expense.delete({ where: { id: entry.expense.id } });
+    if (entry.tipperLoad) await tx.tipperLoad.delete({ where: { id: entry.tipperLoad.id } });
+    if (entry.advance) await tx.advance.delete({ where: { id: entry.advance.id } });
+    if (entry.clientPayment) await tx.clientPayment.delete({ where: { id: entry.clientPayment.id } });
+    if (entry.employeePayout) await tx.employeePayout.delete({ where: { id: entry.employeePayout.id } });
+    if (entry.workerPayout) await tx.workerPayout.delete({ where: { id: entry.workerPayout.id } });
+    await tx.cashEntry.delete({ where: { id } });
+  });
+
+  // Refresh everywhere the removed record may have shown up.
   revalidatePath("/cash");
   revalidatePath("/");
+  revalidatePath("/clients");
+  revalidatePath("/payroll");
+  revalidatePath("/expense");
+  revalidatePath("/tipper");
+  revalidatePath("/employees");
 }

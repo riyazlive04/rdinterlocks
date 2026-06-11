@@ -172,7 +172,7 @@ export default async function CashbookPage({
                       {it.direction === "in" ? "+" : "−"}
                       {formatINR(it.amount)}
                     </div>
-                    <DeleteCashEntry id={it.id} canDelete={it.source === "manual"} />
+                    <DeleteCashEntry id={it.id} source={it.source} />
                   </div>
                 ))}
               </div>
