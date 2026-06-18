@@ -136,10 +136,13 @@ const quickRef: Array<{
     ],
   },
   {
-    action: "Attendance",
-    enter: "Employee detail → Mark attendance",
-    enterHref: "/employees",
-    output: [{ label: "Employee history", href: "/employees" }],
+    action: "Mark leave",
+    enter: "Leave → pick people",
+    enterHref: "/leave",
+    output: [
+      { label: "Leave list", href: "/leave" },
+      { label: "Reports → Salary", href: "/reports?kind=wages" },
+    ],
   },
   {
     action: "Add a login",
@@ -265,8 +268,13 @@ const sections: Array<{
     items: [
       {
         title: "Payroll in one place",
-        body: "Everyone's earned, advances, paid and net payable for the month - operators, masons, loaders and employees together.",
+        body: "Everyone's earned, advances, paid and net payable - operators, masons, loaders and employees together. Filter to one person, and toggle Weekly / Monthly at the top.",
         link: "/payroll",
+      },
+      {
+        title: "Weekly or monthly settlement",
+        body: "Set the cadence per worker type in Settings → Factory (operators, loaders, masons) and per person on each employee. Payroll's Weekly view shows weekly workers by week; Monthly shows monthly staff by month.",
+        link: "/settings/factory",
       },
       {
         title: "Record advance (any worker)",
@@ -277,9 +285,24 @@ const sections: Array<{
         body: "Payroll → Settle pays the net wage, deducts (settles) open advances and posts the cash-out. Net payable then reads zero.",
       },
       {
+        title: "Mark leave (anyone)",
+        body: "Leave screen: pick a date and tap whoever is off (workers or staff). Unmarked = working day. Leave shows in the Salary report and reduces daily-paid employees' earnings.",
+        link: "/leave",
+      },
+      {
+        title: "Salary report (printable)",
+        body: "Reports → Salary: per person, date-wise - Earned (work + accrued salary), Advance (Pending/Settled), Leave and Paid, with a Person filter. Export to PDF/Excel.",
+        link: "/reports?kind=wages",
+      },
+      {
         title: "Mason / Loader rates",
         body: "Mason rate per brick comes from the Price matrix (size × construction type); loader is piece-rate per brick.",
         link: "/settings/price-matrix",
+      },
+      {
+        title: "Loading vs unloading",
+        body: "A load records a loading crew and an optional unloading crew (Loading / Unloading / Both) with separate rates. Both split the same bricks, so bricks aren't double-counted while each crew is paid.",
+        link: "/loading/new",
       },
     ],
   },
@@ -305,12 +328,12 @@ const sections: Array<{
     items: [
       {
         title: "One source of truth",
-        body: "Every money movement - sales, expenses, advances, salary, tipper rent and EMI - posts here automatically. Cash in hand is always live.",
+        body: "Every money movement - sales, expenses, advances, salary, tipper rent and EMI - posts here automatically. Cash in hand is always live. Delete a wrong entry and its linked record (payment, advance, etc.) is removed too.",
         link: "/cash",
       },
       {
         title: "Pick a date range",
-        body: "Today / This week / This month / All, or a custom range - plus filters by type (Salary, Advance, Expense, Sales…).",
+        body: "Today / This week / This month / All, or a custom range - plus filters by type (Salary, Advance, Expense, Sales…). The same date filter and page-by-page paging are on the Production, Loading, Mason, Expense and Tipper lists too.",
       },
     ],
   },
@@ -325,8 +348,13 @@ const sections: Array<{
       },
       {
         title: "Users & access",
-        body: "Create logins and choose which areas each user can see. Leave Revenue off to hide all money totals from a manager.",
+        body: "Create logins and choose which areas each user can see. Leave Revenue off to hide all money totals from a manager; grant Leave marking so a manager can mark days off.",
         link: "/settings/users",
+      },
+      {
+        title: "Salary frequency",
+        body: "Settings → Factory sets weekly/monthly settlement for operators, loaders and masons; each employee's frequency is set on the employee. This drives Payroll's Weekly/Monthly views.",
+        link: "/settings/factory",
       },
       {
         title: "Signing in",
