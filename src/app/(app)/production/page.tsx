@@ -2,14 +2,18 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { formatINR, formatNumber, formatShortDate, startOfDay } from "@/lib/format";
+import { formatINR, formatNumber, formatShortDate, formatISODate, startOfDay } from "@/lib/format";
 import { stageForAge, stageLabel } from "@/lib/stock";
+import { DateRangeFilter } from "@/components/date-range-filter";
+import { Pagination } from "@/components/pagination";
 import { DeleteButton } from "./delete-button";
+
+const PAGE_SIZE = 50;
 
 export default async function ProductionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const today = startOfDay();
@@ -41,6 +45,10 @@ export default async function ProductionPage({
     }),
     { bricks: 0, wage: 0, cement: 0 }
   );
+
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -78,6 +86,8 @@ export default async function ProductionPage({
         </Card>
       </div>
 
+      <DateRangeFilter from={formatISODate(from)} to={formatISODate(to)} />
+
       <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
         Recent entries
       </div>
@@ -114,7 +124,7 @@ export default async function ProductionPage({
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e) => (
+                {pageEntries.map((e) => (
                   <tr key={e.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                     <Td>{formatShortDate(e.date)}</Td>
                     <Td>
@@ -180,7 +190,7 @@ export default async function ProductionPage({
           </div>
         </div>
       )}
-
+      <Pagination page={page} totalPages={totalPages} />
     </>
   );
 }

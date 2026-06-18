@@ -2,13 +2,17 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, EmptyState, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { formatINR, formatNumber, formatShortDate, startOfDay } from "@/lib/format";
+import { formatINR, formatNumber, formatShortDate, formatISODate, startOfDay } from "@/lib/format";
+import { DateRangeFilter } from "@/components/date-range-filter";
+import { Pagination } from "@/components/pagination";
 import { DeleteLoading } from "./delete-button";
+
+const PAGE_SIZE = 50;
 
 export default async function LoadingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; worker?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; worker?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const today = startOfDay();
@@ -43,6 +47,21 @@ export default async function LoadingPage({
     { label: "Operators", items: operators.map((o) => ({ key: `operator:${o.id}`, name: o.name })) },
     { label: "Drivers & staff", items: employees.map((e) => ({ key: `employee:${e.id}`, name: e.name })) },
   ].filter((g) => g.items.length > 0);
+
+  // Keep the date range when switching the worker filter.
+  const keep = new URLSearchParams();
+  if (sp?.from) keep.set("from", sp.from);
+  if (sp?.to) keep.set("to", sp.to);
+  const workerHref = (w?: string) => {
+    const p = new URLSearchParams(keep);
+    if (w) p.set("worker", w);
+    const s = p.toString();
+    return `/loading${s ? `?${s}` : ""}`;
+  };
+
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(works.length / PAGE_SIZE));
+  const pageWorks = works.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -86,9 +105,11 @@ export default async function LoadingPage({
         </Card>
       </div>
 
+      <DateRangeFilter from={formatISODate(from)} to={formatISODate(to)} />
+
       <div className="mb-4 space-y-2">
         <Link
-          href="/loading"
+          href={workerHref()}
           className={`inline-flex px-3 py-1.5 rounded-full text-[12px] font-semibold ${
             !sp?.worker ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
           }`}
@@ -103,7 +124,7 @@ export default async function LoadingPage({
             {g.items.map((w) => (
               <Link
                 key={w.key}
-                href={`/loading?worker=${w.key}`}
+                href={workerHref(w.key)}
                 className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${
                   sp?.worker === w.key
                     ? "bg-ink text-white"
@@ -136,7 +157,7 @@ export default async function LoadingPage({
                 </tr>
               </thead>
               <tbody>
-                {works.map((w) => (
+                {pageWorks.map((w) => (
                   <tr key={w.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                     <Td>{formatShortDate(w.date)}</Td>
                     <Td className="font-semibold">
@@ -170,6 +191,7 @@ export default async function LoadingPage({
           </div>
         </div>
       )}
+      <Pagination page={page} totalPages={totalPages} />
     </>
   );
 }

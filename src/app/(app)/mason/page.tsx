@@ -2,13 +2,17 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { formatINR, formatNumber, formatShortDate, startOfDay, startOfWeek } from "@/lib/format";
+import { formatINR, formatNumber, formatShortDate, formatISODate, startOfDay, startOfWeek } from "@/lib/format";
+import { DateRangeFilter } from "@/components/date-range-filter";
+import { Pagination } from "@/components/pagination";
 import { DeleteMason } from "./delete-button";
+
+const PAGE_SIZE = 50;
 
 export default async function MasonPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; mason?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; mason?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const today = startOfDay();
@@ -39,6 +43,20 @@ export default async function MasonPage({
 
   const totalEarned = works.reduce((s, w) => s + w.totalAmount, 0);
   const totalAdvance = advances.reduce((s, a) => s + a.amount, 0);
+
+  const keep = new URLSearchParams();
+  if (sp?.from) keep.set("from", sp.from);
+  if (sp?.to) keep.set("to", sp.to);
+  const masonHref = (m?: string) => {
+    const p = new URLSearchParams(keep);
+    if (m) p.set("mason", m);
+    const s = p.toString();
+    return `/mason${s ? `?${s}` : ""}`;
+  };
+
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(works.length / PAGE_SIZE));
+  const pageWorks = works.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -80,9 +98,11 @@ export default async function MasonPage({
         </Card>
       </div>
 
+      <DateRangeFilter from={formatISODate(from)} to={formatISODate(to)} />
+
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
         <Link
-          href="/mason"
+          href={masonHref()}
           className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
             !sp?.mason ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
           }`}
@@ -92,7 +112,7 @@ export default async function MasonPage({
         {masons.map((m) => (
           <Link
             key={m.id}
-            href={`/mason?mason=${m.id}`}
+            href={masonHref(m.id)}
             className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
               sp?.mason === m.id
                 ? "bg-ink text-white"
@@ -123,7 +143,7 @@ export default async function MasonPage({
                 </tr>
               </thead>
               <tbody>
-                {works.map((w) => (
+                {pageWorks.map((w) => (
                   <tr key={w.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                     <Td>{formatShortDate(w.date)}</Td>
                     <Td className="font-semibold">{w.mason.name}</Td>
@@ -155,6 +175,7 @@ export default async function MasonPage({
           </div>
         </div>
       )}
+      <Pagination page={page} totalPages={totalPages} />
 
       {advances.length > 0 && (
         <>

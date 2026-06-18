@@ -2,13 +2,17 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { formatINR, formatShortDate, startOfDay } from "@/lib/format";
+import { formatINR, formatShortDate, formatISODate, startOfDay } from "@/lib/format";
+import { DateRangeFilter } from "@/components/date-range-filter";
+import { Pagination } from "@/components/pagination";
 import { DeleteExpense } from "./delete-expense";
+
+const PAGE_SIZE = 50;
 
 export default async function ExpensePage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; category?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; category?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const today = startOfDay();
@@ -38,6 +42,20 @@ export default async function ExpensePage({
   const top = Object.entries(byCat)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
+
+  const keep = new URLSearchParams();
+  if (sp?.from) keep.set("from", sp.from);
+  if (sp?.to) keep.set("to", sp.to);
+  const catHref = (c?: string) => {
+    const p = new URLSearchParams(keep);
+    if (c) p.set("category", c);
+    const s = p.toString();
+    return `/expense${s ? `?${s}` : ""}`;
+  };
+
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(expenses.length / PAGE_SIZE));
+  const pageExpenses = expenses.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -79,10 +97,12 @@ export default async function ExpensePage({
         </Card>
       )}
 
+      <DateRangeFilter from={formatISODate(from)} to={formatISODate(to)} />
+
       {/* Category filter */}
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
         <Link
-          href="/expense"
+          href={catHref()}
           className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
             !sp?.category
               ? "bg-ink text-white"
@@ -94,7 +114,7 @@ export default async function ExpensePage({
         {categories.map((c) => (
           <Link
             key={c.id}
-            href={`/expense?category=${c.id}`}
+            href={catHref(c.id)}
             className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
               sp?.category === c.id
                 ? "bg-ink text-white"
@@ -124,7 +144,7 @@ export default async function ExpensePage({
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((e) => (
+                {pageExpenses.map((e) => (
                   <tr key={e.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                     <Td>{formatShortDate(e.date)}</Td>
                     <Td className="font-semibold text-ink">{e.title}</Td>
@@ -151,6 +171,7 @@ export default async function ExpensePage({
           </div>
         </div>
       )}
+      <Pagination page={page} totalPages={totalPages} />
     </>
   );
 }

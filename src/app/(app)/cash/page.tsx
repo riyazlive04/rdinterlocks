@@ -6,11 +6,20 @@ import { Icon } from "@/components/icons";
 import { formatINR, formatISODate, formatShortDate, startOfDay, startOfMonth } from "@/lib/format";
 import { DeleteCashEntry } from "./delete-button";
 import { CashDateFilter } from "./date-filter";
+import { Pagination } from "@/components/pagination";
+
+const PAGE_SIZE = 50;
 
 export default async function CashbookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; direction?: string; source?: string }>;
+  searchParams: Promise<{
+    from?: string;
+    to?: string;
+    direction?: string;
+    source?: string;
+    page?: string;
+  }>;
 }) {
   await requireArea("cash");
   const sp = await searchParams;
@@ -36,9 +45,14 @@ export default async function CashbookPage({
   const periodIn = entries.filter((e) => e.direction === "in").reduce((s, e) => s + e.amount, 0);
   const periodOut = entries.filter((e) => e.direction === "out").reduce((s, e) => s + e.amount, 0);
 
-  // Group by date
+  // Paginate the ledger; period totals above still reflect the whole range.
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Group the current page by date
   const groups: Record<string, typeof entries> = {};
-  for (const e of entries) {
+  for (const e of pageEntries) {
     const k = e.date.toDateString();
     (groups[k] ??= []).push(e);
   }
@@ -180,6 +194,7 @@ export default async function CashbookPage({
           );
         })
       )}
+      <Pagination page={page} totalPages={totalPages} />
     </>
   );
 }

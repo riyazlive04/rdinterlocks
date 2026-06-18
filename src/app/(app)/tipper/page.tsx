@@ -2,13 +2,17 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { formatINR, formatNumber, formatShortDate, startOfDay } from "@/lib/format";
+import { formatINR, formatNumber, formatShortDate, formatISODate, startOfDay } from "@/lib/format";
+import { DateRangeFilter } from "@/components/date-range-filter";
+import { Pagination } from "@/components/pagination";
 import { DeleteTipperLoad } from "./delete-load";
+
+const PAGE_SIZE = 50;
 
 export default async function TipperPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; tipper?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; tipper?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const today = startOfDay();
@@ -34,6 +38,20 @@ export default async function TipperPage({
   const rentOut = loads
     .filter((l) => l.rentDirection === "out" && l.rentAmount > 0)
     .reduce((s, l) => s + l.rentAmount, 0);
+
+  const keep = new URLSearchParams();
+  if (sp?.from) keep.set("from", sp.from);
+  if (sp?.to) keep.set("to", sp.to);
+  const tipperHref = (t?: string) => {
+    const p = new URLSearchParams(keep);
+    if (t) p.set("tipper", t);
+    const s = p.toString();
+    return `/tipper${s ? `?${s}` : ""}`;
+  };
+
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(loads.length / PAGE_SIZE));
+  const pageLoads = loads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -75,9 +93,11 @@ export default async function TipperPage({
         </Card>
       </div>
 
+      <DateRangeFilter from={formatISODate(from)} to={formatISODate(to)} />
+
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
         <Link
-          href="/tipper"
+          href={tipperHref()}
           className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
             !sp?.tipper ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
           }`}
@@ -87,7 +107,7 @@ export default async function TipperPage({
         {tippers.map((t) => (
           <Link
             key={t.id}
-            href={`/tipper?tipper=${t.id}`}
+            href={tipperHref(t.id)}
             className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap ${
               sp?.tipper === t.id
                 ? "bg-ink text-white"
@@ -123,7 +143,7 @@ export default async function TipperPage({
                 </tr>
               </thead>
               <tbody>
-                {loads.map((l) => (
+                {pageLoads.map((l) => (
                   <tr key={l.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                     <Td>{formatShortDate(l.date)}</Td>
                     <Td>
@@ -173,6 +193,7 @@ export default async function TipperPage({
           </div>
         </div>
       )}
+      <Pagination page={page} totalPages={totalPages} />
     </>
   );
 }

@@ -3,11 +3,14 @@ import { prisma } from "@/lib/db";
 import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR } from "@/lib/format";
+import { Pagination } from "@/components/pagination";
+
+const PAGE_SIZE = 50;
 
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const q = sp?.q?.trim() ?? "";
@@ -32,6 +35,10 @@ export default async function ClientsPage({
     },
     orderBy: { name: "asc" },
   });
+
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(clients.length / PAGE_SIZE));
+  const pageClients = clients.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -79,7 +86,7 @@ export default async function ClientsPage({
         />
       ) : (
         <div className="grid sm:grid-cols-2 gap-3">
-          {clients.map((c) => {
+          {pageClients.map((c) => {
             const ordered = c.orders.reduce(
               (s, o) => s + o.items.reduce((x, i) => x + i.total, 0),
               0
@@ -116,6 +123,7 @@ export default async function ClientsPage({
           })}
         </div>
       )}
+      <Pagination page={page} totalPages={totalPages} />
     </>
   );
 }
