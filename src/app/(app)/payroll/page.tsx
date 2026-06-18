@@ -5,6 +5,7 @@ import { requireArea } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import { formatINR } from "@/lib/format";
 import { PayrollAdvanceForm } from "./advance-form";
+import { PayrollPersonFilter } from "./filter";
 import { SettleButton } from "./settle-button";
 import { createWorkerAdvance, payWorker } from "./actions";
 
@@ -51,7 +52,7 @@ type Row = {
 export default async function PayrollPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; person?: string }>;
 }) {
   await requireArea("payroll");
   const sp = await searchParams;
@@ -155,19 +156,29 @@ export default async function PayrollPage({
     };
   });
 
-  const sections = [
-    { title: "Operators (production)", href: "/settings/operators", rows: operatorRows, linkBase: "" },
-    { title: "Masons", href: "/mason", rows: masonRows, linkBase: "" },
-    { title: "Loaders", href: "/loading", rows: loaderRows, linkBase: "" },
-    { title: "Employees (salary)", href: "/employees", rows: employeeRows, linkBase: "/employees/" },
-  ];
+  // Optional filter to a single person (the dropdown on the page).
+  const person = (sp?.person ?? "").trim();
+  const keep = (r: Row) => !person || r.id === person;
+  const fOperators = operatorRows.filter(keep);
+  const fMasons = masonRows.filter(keep);
+  const fLoaders = loaderRows.filter(keep);
+  const fEmployees = employeeRows.filter(keep);
 
   const net = (r: Row) => Math.max(0, r.earned - r.advances - r.paid);
+
+  const sections = [
+    { title: "Operators (production)", href: "/settings/operators", rows: fOperators, linkBase: "" },
+    { title: "Masons", href: "/mason", rows: fMasons, linkBase: "" },
+    { title: "Loaders", href: "/loading", rows: fLoaders, linkBase: "" },
+    { title: "Employees (salary)", href: "/employees", rows: fEmployees, linkBase: "/employees/" },
+  ].filter((s) => !person || s.rows.length > 0);
+
+  const allFiltered = [...fOperators, ...fMasons, ...fLoaders, ...fEmployees];
   const grand = {
-    earned: [...operatorRows, ...masonRows, ...loaderRows, ...employeeRows].reduce((s, r) => s + r.earned, 0),
-    advances: [...operatorRows, ...masonRows, ...loaderRows, ...employeeRows].reduce((s, r) => s + r.advances, 0),
-    paid: [...operatorRows, ...masonRows, ...loaderRows, ...employeeRows].reduce((s, r) => s + r.paid, 0),
-    net: [...operatorRows, ...masonRows, ...loaderRows, ...employeeRows].reduce((s, r) => s + net(r), 0),
+    earned: allFiltered.reduce((s, r) => s + r.earned, 0),
+    advances: allFiltered.reduce((s, r) => s + r.advances, 0),
+    paid: allFiltered.reduce((s, r) => s + r.paid, 0),
+    net: allFiltered.reduce((s, r) => s + net(r), 0),
   };
 
   const advanceGroups = [
@@ -192,7 +203,7 @@ export default async function PayrollPage({
       <Card className="mb-4">
         <div className="flex items-center justify-between">
           <Link
-            href={`/payroll?month=${prev}`}
+            href={`/payroll?month=${prev}${person ? `&person=${person}` : ""}`}
             className="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 inline-flex items-center justify-center"
           >
             <Icon.Chevron size={16} className="rotate-180" />
@@ -202,13 +213,18 @@ export default async function PayrollPage({
             <div className="text-lg font-bold text-ink">{label}</div>
           </div>
           <Link
-            href={`/payroll?month=${next}`}
+            href={`/payroll?month=${next}${person ? `&person=${person}` : ""}`}
             className="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 inline-flex items-center justify-center"
           >
             <Icon.Chevron size={16} />
           </Link>
         </div>
       </Card>
+
+      <PayrollPersonFilter
+        groups={advanceGroups.map((g) => ({ label: g.label, people: g.people }))}
+        value={person}
+      />
 
       <div className="grid sm:grid-cols-4 gap-3 mb-5">
         <Stat label="Total earned" value={formatINR(grand.earned)} />

@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
     categoryId: sp.get("categoryId") ?? undefined,
     vendorId: sp.get("vendorId") ?? undefined,
     tipperId: sp.get("tipperId") ?? undefined,
+    personId: sp.get("personId") ?? undefined,
   });
 
   const settings = await prisma.settings.findUnique({ where: { id: "default" } });

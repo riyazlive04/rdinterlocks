@@ -80,6 +80,7 @@ export default async function ReportsPage({
     categoryId?: string;
     vendorId?: string;
     tipperId?: string;
+    personId?: string;
   }>;
 }) {
   const session = await requireArea("reports");
@@ -96,13 +97,25 @@ export default async function ReportsPage({
   const range = sp?.range ?? "month";
   const { from, to } = rangeFor(range, sp?.from, sp?.to);
 
-  const [clients, sizes, categories, vendors, tippers] = await Promise.all([
-    prisma.client.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
-    prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
-    prisma.expenseCategory.findMany({ orderBy: { order: "asc" } }),
-    prisma.vendor.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
-    prisma.tipper.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
-  ]);
+  const [clients, sizes, categories, vendors, tippers, operators, masons, loaders, employees] =
+    await Promise.all([
+      prisma.client.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+      prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
+      prisma.expenseCategory.findMany({ orderBy: { order: "asc" } }),
+      prisma.vendor.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+      prisma.tipper.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+      prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+      prisma.mason.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+      prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+      prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    ]);
+
+  const people = [
+    ...operators.map((o) => ({ value: o.id, label: `${o.name} · operator` })),
+    ...masons.map((m) => ({ value: m.id, label: `${m.name} · mason` })),
+    ...loaders.map((l) => ({ value: l.id, label: `${l.name} · loader` })),
+    ...employees.map((e) => ({ value: e.id, label: `${e.name} · ${e.role}` })),
+  ];
 
   const buildUrl = (overrides: Record<string, string | undefined>) => {
     const u = new URLSearchParams();
@@ -116,6 +129,7 @@ export default async function ReportsPage({
       categoryId: sp?.categoryId,
       vendorId: sp?.vendorId,
       tipperId: sp?.tipperId,
+      personId: sp?.personId,
       ...overrides,
     };
     for (const [k, v] of Object.entries(merged)) {
@@ -136,6 +150,7 @@ export default async function ReportsPage({
     if (sp?.categoryId) u.set("categoryId", sp.categoryId);
     if (sp?.vendorId) u.set("vendorId", sp.vendorId);
     if (sp?.tipperId) u.set("tipperId", sp.tipperId);
+    if (sp?.personId) u.set("personId", sp.personId);
     return `/api/export?${u.toString()}`;
   };
 
@@ -265,6 +280,14 @@ export default async function ReportsPage({
                   buildHref={(v) => buildUrl({ tipperId: v })}
                 />
               )}
+              {kind === "wages" && people.length > 0 && (
+                <FilterDropdown
+                  label="Person"
+                  value={sp?.personId}
+                  options={people}
+                  buildHref={(v) => buildUrl({ personId: v })}
+                />
+              )}
             </div>
           )}
         </div>
@@ -282,6 +305,7 @@ export default async function ReportsPage({
           categoryId={sp?.categoryId}
           vendorId={sp?.vendorId}
           tipperId={sp?.tipperId}
+          personId={sp?.personId}
         />
       )}
     </>
@@ -457,6 +481,7 @@ async function LedgerSection({
   categoryId?: string;
   vendorId?: string;
   tipperId?: string;
+  personId?: string;
 }) {
   const data = await getReportData({ from, to, kind, ...filters });
   const totalEntries = data.sections.reduce((s, sec) => s + sec.rows.length, 0);

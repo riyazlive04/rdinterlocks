@@ -19,6 +19,7 @@ export type ReportFilter = {
   categoryId?: string;
   vendorId?: string;
   tipperId?: string;
+  personId?: string;
 };
 
 export type LedgerCol = {
@@ -471,74 +472,162 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
     }
 
     case "wages": {
-      const advances = await prisma.advance.findMany({
-        where: { date: dateRange },
-        include: { operator: true, mason: true, loader: true, employee: true },
-      });
-      const payouts = await prisma.employeePayout.findMany({
-        where: { date: dateRange },
-        include: { employee: true },
-      });
+      // Everything a worker earns or is given: daily earnings (production
+      // shares, loading/unloading, mason work) shown as Earned, plus Advances
+      // and Salary paid — each in its own column so daily/grand totals add up.
+      const [shares, loadingWorks, masonWorks, advances, employeePayouts, workerPayouts] =
+        await Promise.all([
+          prisma.productionShare.findMany({
+            where: { productionEntry: { date: dateRange } },
+            include: { operator: true, productionEntry: true },
+          }),
+          prisma.loadingWork.findMany({
+            where: { date: dateRange },
+            include: { loader: true, operator: true, employee: true },
+          }),
+          prisma.masonWork.findMany({ where: { date: dateRange }, include: { mason: true } }),
+          prisma.advance.findMany({
+            where: { date: dateRange },
+            include: { operator: true, mason: true, loader: true, employee: true },
+          }),
+          prisma.employeePayout.findMany({
+            where: { date: dateRange },
+            include: { employee: true },
+          }),
+          prisma.workerPayout.findMany({
+            where: { date: dateRange },
+            include: { operator: true, mason: true, loader: true, employee: true },
+          }),
+        ]);
+
       type Entry = {
         id: string;
+        pid: string | null;
         date: Date;
         person: string;
         role: string;
         kind: string;
+        status: string;
         notes: string;
-        settled: string;
-        amount: number;
+        earned: number | null;
+        advance: number | null;
+        paid: number | null;
       };
-      const entries: Entry[] = [
+
+      let entries: Entry[] = [
+        ...shares.map((s) => ({
+          id: `ps-${s.id}`,
+          pid: s.operatorId,
+          date: s.productionEntry.date,
+          person: s.operator.name,
+          role: "operator",
+          kind: "Production",
+          status: "Earned",
+          notes: `${s.brickCount.toLocaleString("en-IN")} bricks`,
+          earned: s.amount,
+          advance: null,
+          paid: null,
+        })),
+        ...loadingWorks.map((w) => ({
+          id: `lw-${w.id}`,
+          pid: w.loaderId ?? w.operatorId ?? w.employeeId,
+          date: w.date,
+          person: w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-",
+          role: w.workerType,
+          kind: w.phase === "unloading" ? "Unloading" : "Loading",
+          status: "Earned",
+          notes: "",
+          earned: w.totalAmount,
+          advance: null,
+          paid: null,
+        })),
+        ...masonWorks.map((w) => ({
+          id: `mw-${w.id}`,
+          pid: w.masonId,
+          date: w.date,
+          person: w.mason.name,
+          role: "mason",
+          kind: "Mason",
+          status: "Earned",
+          notes: w.siteName,
+          earned: w.totalAmount,
+          advance: null,
+          paid: null,
+        })),
         ...advances.map((a) => ({
-          id: a.id,
+          id: `ad-${a.id}`,
+          pid: a.operatorId ?? a.masonId ?? a.loaderId ?? a.employeeId,
           date: a.date,
           person: a.operator?.name ?? a.mason?.name ?? a.loader?.name ?? a.employee?.name ?? "-",
           role: a.personType,
           kind: "Advance",
+          status: a.settled ? "Settled" : "Pending",
           notes: a.notes ?? "",
-          settled: a.settled ? "Yes" : "Open",
-          amount: a.amount,
+          earned: null,
+          advance: a.amount,
+          paid: null,
         })),
-        ...payouts.map((p) => ({
-          id: p.id,
+        ...employeePayouts.map((p) => ({
+          id: `ep-${p.id}`,
+          pid: p.employeeId,
           date: p.date,
           person: p.employee.name,
           role: "employee",
-          kind: "Salary",
+          kind: "Salary paid",
+          status: "Paid",
           notes: p.notes ?? "",
-          settled: "Paid",
-          amount: p.netPaid,
+          earned: null,
+          advance: null,
+          paid: p.netPaid,
+        })),
+        ...workerPayouts.map((p) => ({
+          id: `wp-${p.id}`,
+          pid: p.operatorId ?? p.masonId ?? p.loaderId ?? p.employeeId,
+          date: p.date,
+          person: p.operator?.name ?? p.mason?.name ?? p.loader?.name ?? p.employee?.name ?? "-",
+          role: p.personType,
+          kind: "Salary paid",
+          status: "Paid",
+          notes: p.notes ?? "",
+          earned: null,
+          advance: null,
+          paid: p.netPaid,
         })),
       ];
-      const moneyKeys = ["amount"];
+
+      if (filter.personId) entries = entries.filter((e) => e.pid === filter.personId);
+
+      const moneyKeys = ["earned", "advance", "paid"];
       const { sections, totals } = groupByDate(
         entries,
         (e) => ({
           id: e.id,
-          emphasis: "debit",
           cells: {
             person: e.person,
             role: e.role,
             kind: e.kind,
+            status: e.status,
             notes: e.notes,
-            settled: e.settled,
-            amount: e.amount,
+            earned: e.earned,
+            advance: e.advance,
+            paid: e.paid,
           },
         }),
         moneyKeys
       );
       return {
-        title: "Salary & advances",
+        title: "Earnings & advances",
         unit: "entries",
         moneyKeys,
         columns: [
           { key: "person", header: "Person", format: "text" },
           { key: "role", header: "Role", format: "muted" },
           { key: "kind", header: "Kind" },
+          { key: "status", header: "Status", format: "muted" },
           { key: "notes", header: "Notes", format: "muted" },
-          { key: "settled", header: "Status", format: "muted" },
-          { key: "amount", header: "Amount", format: "money", align: "right" },
+          { key: "earned", header: "Earned", format: "money", align: "right" },
+          { key: "advance", header: "Advance", format: "money", align: "right" },
+          { key: "paid", header: "Paid", format: "money", align: "right" },
         ],
         sections,
         totals,
