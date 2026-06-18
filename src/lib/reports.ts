@@ -475,7 +475,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
       // Everything a worker earns or is given: daily earnings (production
       // shares, loading/unloading, mason work) shown as Earned, plus Advances
       // and Salary paid — each in its own column so daily/grand totals add up.
-      const [shares, loadingWorks, masonWorks, advances, employeePayouts, workerPayouts] =
+      const [shares, loadingWorks, masonWorks, advances, employeePayouts, workerPayouts, leaves, employees] =
         await Promise.all([
           prisma.productionShare.findMany({
             where: { productionEntry: { date: dateRange } },
@@ -498,6 +498,11 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
             where: { date: dateRange },
             include: { operator: true, mason: true, loader: true, employee: true },
           }),
+          prisma.leave.findMany({
+            where: { date: dateRange },
+            include: { operator: true, mason: true, loader: true, employee: true },
+          }),
+          prisma.employee.findMany({ where: { active: true } }),
         ]);
 
       type Entry = {
@@ -512,6 +517,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         earned: number | null;
         advance: number | null;
         paid: number | null;
+        leave?: number | null;
       };
 
       let entries: Entry[] = [
@@ -595,9 +601,64 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         })),
       ];
 
+      // Employee accrued salary for the range (running, before payout). Daily
+      // pay = rate × working days (range days − leaves); monthly = full rate.
+      const daysInRange = Math.max(
+        1,
+        Math.round((filter.to.getTime() - filter.from.getTime()) / 86400000) + 1
+      );
+      const leaveCount = (empId: string) => leaves.filter((l) => l.employeeId === empId).length;
+      for (const e of employees) {
+        let earned = 0;
+        let note = "";
+        if (e.payType === "monthly") {
+          earned = e.payRate;
+          note = "monthly salary";
+        } else if (e.payType === "daily") {
+          const lv = leaveCount(e.id);
+          const wd = Math.max(0, daysInRange - lv);
+          earned = e.payRate * wd;
+          note = `${wd} day${wd === 1 ? "" : "s"} × ₹${e.payRate}${lv ? ` · ${lv} leave` : ""}`;
+        }
+        if (earned > 0) {
+          entries.push({
+            id: `ea-${e.id}`,
+            pid: e.id,
+            date: filter.to,
+            person: e.name,
+            role: e.role,
+            kind: "Salary",
+            status: "Accrued",
+            notes: note,
+            earned,
+            advance: null,
+            paid: null,
+          });
+        }
+      }
+
+      // Leave entries (date-wise) for any worker.
+      for (const l of leaves) {
+        entries.push({
+          id: `lv-${l.id}`,
+          pid: l.operatorId ?? l.loaderId ?? l.masonId ?? l.employeeId,
+          date: l.date,
+          person: l.operator?.name ?? l.loader?.name ?? l.mason?.name ?? l.employee?.name ?? "-",
+          role: l.personType,
+          kind: "Leave",
+          status: "Leave",
+          notes: l.reason ?? "",
+          earned: null,
+          advance: null,
+          paid: null,
+          leave: 1,
+        });
+      }
+
       if (filter.personId) entries = entries.filter((e) => e.pid === filter.personId);
 
       const moneyKeys = ["earned", "advance", "paid"];
+      const numberKeys = ["leave"];
       const { sections, totals } = groupByDate(
         entries,
         (e) => ({
@@ -608,23 +669,27 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
             kind: e.kind,
             status: e.status,
             notes: e.notes,
+            leave: e.leave ?? null,
             earned: e.earned,
             advance: e.advance,
             paid: e.paid,
           },
         }),
-        moneyKeys
+        moneyKeys,
+        numberKeys
       );
       return {
-        title: "Earnings & advances",
+        title: "Earnings, advances & leave",
         unit: "entries",
         moneyKeys,
+        numberKeys,
         columns: [
           { key: "person", header: "Person", format: "text" },
           { key: "role", header: "Role", format: "muted" },
           { key: "kind", header: "Kind" },
           { key: "status", header: "Status", format: "muted" },
           { key: "notes", header: "Notes", format: "muted" },
+          { key: "leave", header: "Leave", format: "number", align: "right" },
           { key: "earned", header: "Earned", format: "money", align: "right" },
           { key: "advance", header: "Advance", format: "money", align: "right" },
           { key: "paid", header: "Paid", format: "money", align: "right" },

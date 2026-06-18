@@ -71,6 +71,13 @@ export const primaryNav: NavItem[] = [
     matches: ["/employees"],
   },
   {
+    id: "leave",
+    label: "Leave",
+    href: "/leave",
+    icon: "Calendar",
+    matches: ["/leave"],
+  },
+  {
     id: "payroll",
     label: "Payroll",
     href: "/payroll",
