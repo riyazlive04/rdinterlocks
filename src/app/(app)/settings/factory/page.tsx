@@ -19,6 +19,9 @@ export default async function FactorySettingsPage() {
           cashOpening: s?.cashOpening ?? 0,
           dryingDays: s?.dryingDays ?? 3,
           curingDays: s?.curingDays ?? 10,
+          operatorPayFreq: (s?.operatorPayFreq as "weekly" | "monthly") ?? "weekly",
+          loaderPayFreq: (s?.loaderPayFreq as "weekly" | "monthly") ?? "weekly",
+          masonPayFreq: (s?.masonPayFreq as "weekly" | "monthly") ?? "weekly",
         }}
         onSave={async (data) => {
           "use server";

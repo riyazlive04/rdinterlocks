@@ -38,6 +38,42 @@ function monthBounds(monthParam?: string) {
   };
 }
 
+function isoDay(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function weekBounds(weekParam: string | undefined, weekStartDay: number) {
+  let base = new Date();
+  if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
+    const [y, m, d] = weekParam.split("-").map(Number);
+    base = new Date(y, m - 1, d);
+  }
+  base.setHours(0, 0, 0, 0);
+  const back = (base.getDay() - weekStartDay + 7) % 7;
+  const start = new Date(base);
+  start.setDate(base.getDate() - back);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  const prevD = new Date(start);
+  prevD.setDate(start.getDate() - 7);
+  const nextD = new Date(start);
+  nextD.setDate(start.getDate() + 7);
+  const sm = monthNames[start.getMonth()].slice(0, 3);
+  const em = monthNames[end.getMonth()].slice(0, 3);
+  return {
+    start,
+    end,
+    key: isoDay(start),
+    label: `${start.getDate()} ${sm} – ${end.getDate()} ${em} ${end.getFullYear()}`,
+    prev: isoDay(prevD),
+    next: isoDay(nextD),
+  };
+}
+
 type PersonType = "operator" | "mason" | "loader" | "employee";
 type Row = {
   id: string;
@@ -52,12 +88,21 @@ type Row = {
 export default async function PayrollPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; person?: string }>;
+  searchParams: Promise<{ month?: string; week?: string; view?: string; person?: string }>;
 }) {
   await requireArea("payroll");
   const sp = await searchParams;
-  const { start, end, label, prev, next } = monthBounds(sp?.month);
+  const settings = await prisma.settings.findUnique({ where: { id: "default" } });
+  const view: "weekly" | "monthly" = sp?.view === "monthly" ? "monthly" : "weekly";
+  const { start, end, label, prev, next } =
+    view === "monthly" ? monthBounds(sp?.month) : weekBounds(sp?.week, settings?.weekStartDay ?? 1);
   const range = { gte: start, lte: end };
+
+  const freq = {
+    operator: settings?.operatorPayFreq ?? "weekly",
+    loader: settings?.loaderPayFreq ?? "weekly",
+    mason: settings?.masonPayFreq ?? "weekly",
+  };
 
   const [operators, masons, loaders, employees, periodAdvances, openAdvances, workerPayouts, payouts] =
     await Promise.all([
@@ -159,10 +204,18 @@ export default async function PayrollPage({
   // Optional filter to a single person (the dropdown on the page).
   const person = (sp?.person ?? "").trim();
   const keep = (r: Row) => !person || r.id === person;
-  const fOperators = operatorRows.filter(keep);
-  const fMasons = masonRows.filter(keep);
-  const fLoaders = loaderRows.filter(keep);
-  const fEmployees = employeeRows.filter(keep);
+  // With no person picked, show only workers settled on this view's cadence
+  // (weekly vs monthly). A picked person always shows regardless of cadence.
+  const includeType = (f: string) => !!person || f === view;
+  const viewEmpIds = new Set(
+    employees.filter((e) => (e.payFrequency ?? "monthly") === view).map((e) => e.id)
+  );
+  const keepEmp = (r: Row) => keep(r) && (!!person || viewEmpIds.has(r.id));
+
+  const fOperators = (includeType(freq.operator) ? operatorRows : []).filter(keep);
+  const fMasons = (includeType(freq.mason) ? masonRows : []).filter(keep);
+  const fLoaders = (includeType(freq.loader) ? loaderRows : []).filter(keep);
+  const fEmployees = employeeRows.filter(keepEmp);
 
   const net = (r: Row) => Math.max(0, r.earned - r.advances - r.paid);
 
@@ -188,6 +241,20 @@ export default async function PayrollPage({
     { type: "employee" as const, label: "Employees", people: employees.map((e) => ({ id: e.id, name: e.name })) },
   ];
 
+  const navHref = (p: string) => {
+    const params = new URLSearchParams();
+    params.set("view", view);
+    params.set(view === "monthly" ? "month" : "week", p);
+    if (person) params.set("person", person);
+    return `/payroll?${params.toString()}`;
+  };
+  const viewHref = (v: "weekly" | "monthly") => {
+    const params = new URLSearchParams();
+    params.set("view", v);
+    if (person) params.set("person", person);
+    return `/payroll?${params.toString()}`;
+  };
+
   return (
     <>
       <PageHeader title="Payroll" sub="Everyone's salary for the month, in one place" />
@@ -201,19 +268,34 @@ export default async function PayrollPage({
       />
 
       <Card className="mb-4">
+        <div className="flex justify-center gap-1.5 mb-3">
+          {(["weekly", "monthly"] as const).map((v) => (
+            <Link
+              key={v}
+              href={viewHref(v)}
+              className={`px-4 py-1.5 rounded-full text-[12px] font-semibold capitalize ${
+                view === v ? "bg-ink text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              {v}
+            </Link>
+          ))}
+        </div>
         <div className="flex items-center justify-between">
           <Link
-            href={`/payroll?month=${prev}${person ? `&person=${person}` : ""}`}
+            href={navHref(prev)}
             className="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 inline-flex items-center justify-center"
           >
             <Icon.Chevron size={16} className="rotate-180" />
           </Link>
           <div className="text-center">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Period</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              {view === "weekly" ? "Week" : "Month"}
+            </div>
             <div className="text-lg font-bold text-ink">{label}</div>
           </div>
           <Link
-            href={`/payroll?month=${next}${person ? `&person=${person}` : ""}`}
+            href={navHref(next)}
             className="w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 inline-flex items-center justify-center"
           >
             <Icon.Chevron size={16} />
@@ -229,7 +311,7 @@ export default async function PayrollPage({
       <div className="grid sm:grid-cols-4 gap-3 mb-5">
         <Stat label="Total earned" value={formatINR(grand.earned)} />
         <Stat label="Open advances" value={formatINR(grand.advances)} color="text-amber-700" />
-        <Stat label="Paid this month" value={formatINR(grand.paid)} color="text-emerald-700" />
+        <Stat label="Paid this period" value={formatINR(grand.paid)} color="text-emerald-700" />
         <Stat label="Net still payable" value={formatINR(grand.net)} color="text-brand-red" big />
       </div>
 

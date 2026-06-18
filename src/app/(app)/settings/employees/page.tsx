@@ -19,6 +19,7 @@ export default async function EmployeesSettingsPage() {
           role: r.role,
           payType: r.payType,
           payRate: r.payRate,
+          payFrequency: r.payFrequency,
           phone: r.phone ?? "",
         }))}
         fields={[
@@ -36,6 +37,16 @@ export default async function EmployeesSettingsPage() {
             ],
           },
           { type: "number", key: "payRate", label: "Pay rate (₹)", required: true, step: "1" },
+          {
+            type: "select",
+            key: "payFrequency",
+            label: "Salary frequency",
+            required: true,
+            options: [
+              { value: "monthly", label: "Monthly" },
+              { value: "weekly", label: "Weekly" },
+            ],
+          },
           { type: "text", key: "phone", label: "Phone" },
         ]}
         columns={[
@@ -43,6 +54,7 @@ export default async function EmployeesSettingsPage() {
           { key: "role", header: "Role", format: "muted" },
           { key: "payType", header: "Pay", format: "capitalize" },
           { key: "payRate", header: "Rate", format: "currency" },
+          { key: "payFrequency", header: "Frequency", format: "capitalize" },
           { key: "phone", header: "Phone", format: "mono" },
         ]}
         onCreate={async (d) => {
@@ -52,6 +64,7 @@ export default async function EmployeesSettingsPage() {
             role: String(d.role || "staff"),
             payType: d.payType as "monthly" | "daily" | "hourly",
             payRate: Number(d.payRate || 0),
+            payFrequency: (d.payFrequency as "weekly" | "monthly") || "monthly",
             phone: String(d.phone || ""),
           });
         }}
@@ -62,6 +75,7 @@ export default async function EmployeesSettingsPage() {
             role: String(d.role || "staff"),
             payType: d.payType as "monthly" | "daily" | "hourly",
             payRate: Number(d.payRate || 0),
+            payFrequency: (d.payFrequency as "weekly" | "monthly") || "monthly",
             phone: String(d.phone || ""),
           });
         }}

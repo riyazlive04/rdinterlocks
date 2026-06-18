@@ -40,6 +40,11 @@ model Settings {
   // Produced (day 0) -> Drying (1..dryingDays) -> Curing (..curingDays) -> Ready.
   dryingDays      Int     @default(3)
   curingDays      Int     @default(10)
+  // Default salary settlement cadence per worker type (weekly | monthly).
+  // Employees are set individually on each employee instead.
+  operatorPayFreq String  @default("weekly")
+  loaderPayFreq   String  @default("weekly")
+  masonPayFreq    String  @default("weekly")
 }
 
 model Machine {
@@ -182,6 +187,7 @@ model Employee {
   role      String   @default("staff") // staff, driver, watchman, etc.
   payType   String   @default("monthly") // monthly | daily | hourly
   payRate   Float    @default(0) // ₹ per period
+  payFrequency String @default("monthly") // weekly | monthly - salary settlement cadence
   phone     String?
   joinedAt  DateTime @default(now())
   active    Boolean  @default(true)

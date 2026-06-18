@@ -1,8 +1,9 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card, Field, Input } from "@/components/ui";
+import { Button, Card, Field, Input, Select } from "@/components/ui";
 
+type Freq = "weekly" | "monthly";
 type Settings = {
   factoryName: string;
   ownerName: string;
@@ -13,6 +14,9 @@ type Settings = {
   cashOpening: number;
   dryingDays: number;
   curingDays: number;
+  operatorPayFreq: Freq;
+  loaderPayFreq: Freq;
+  masonPayFreq: Freq;
 };
 
 export function FactoryForm({
@@ -112,6 +116,42 @@ export function FactoryForm({
             onChange={(e) => setForm({ ...form, curingDays: Number(e.target.value) })}
           />
         </Field>
+      </div>
+
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mt-5 mb-2">
+        Salary settlement frequency
+      </div>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <Field label="Operators" hint="When operator wages settle.">
+          <Select
+            value={form.operatorPayFreq}
+            onChange={(e) => setForm({ ...form, operatorPayFreq: e.target.value as Freq })}
+          >
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </Select>
+        </Field>
+        <Field label="Loaders">
+          <Select
+            value={form.loaderPayFreq}
+            onChange={(e) => setForm({ ...form, loaderPayFreq: e.target.value as Freq })}
+          >
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </Select>
+        </Field>
+        <Field label="Masons">
+          <Select
+            value={form.masonPayFreq}
+            onChange={(e) => setForm({ ...form, masonPayFreq: e.target.value as Freq })}
+          >
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </Select>
+        </Field>
+      </div>
+      <div className="text-[11px] text-slate-400 mt-1.5">
+        Employees (drivers, manager, staff) are set individually on each employee.
       </div>
       {error && <div className="text-xs text-red-600 mt-2">{error}</div>}
       {saved && <div className="text-xs text-emerald-700 mt-2">✓ Saved</div>}

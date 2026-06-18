@@ -196,6 +196,7 @@ const empSchema = z.object({
   role: z.string().default("staff"),
   payType: z.enum(["monthly", "daily", "hourly"]),
   payRate: z.number().nonnegative(),
+  payFrequency: z.enum(["weekly", "monthly"]).default("monthly"),
   phone: z.string().optional(),
 });
 
@@ -295,6 +296,9 @@ const settingsSchema = z.object({
   cashOpening: z.number(),
   dryingDays: z.number().int().nonnegative().default(3),
   curingDays: z.number().int().nonnegative().default(10),
+  operatorPayFreq: z.enum(["weekly", "monthly"]).default("weekly"),
+  loaderPayFreq: z.enum(["weekly", "monthly"]).default("weekly"),
+  masonPayFreq: z.enum(["weekly", "monthly"]).default("weekly"),
 });
 
 export async function updateSettings(data: z.infer<typeof settingsSchema>) {
