@@ -200,15 +200,32 @@ export async function GET(req: NextRequest) {
 
     let y = 110;
     const pageWidth = doc.page.width - 72;
-    const colCount = columnsWithDate.length;
-    const colWidths = columnsWithDate.map(() => pageWidth / colCount);
+
+    // Proportional column widths from content length, so wide text columns
+    // (e.g. Operators) get more room while numeric columns stay compact. Each
+    // weight is capped so one long cell can't dominate, with a floor per column.
+    const weights = columnsWithDate.map((c) => {
+      let maxLen = c.header.length;
+      for (const r of flat) {
+        const v = c.key === "_date" ? r.date : r.cells[c.key];
+        const s = v == null ? "" : String(v);
+        if (s.length > maxLen) maxLen = s.length;
+      }
+      return Math.max(5, Math.min(maxLen, 26));
+    });
+    const weightSum = weights.reduce((a, b) => a + b, 0);
+    const colWidths = weights.map((w) => (w / weightSum) * pageWidth);
+
+    // Respect each column's alignment (numbers right-aligned, text left).
+    const alignFor = (key: string): "left" | "right" | "center" =>
+      key === "_date" ? "left" : data.columns.find((d) => d.key === key)?.align ?? "left";
 
     // Header
     doc.rect(36, y, pageWidth, 22).fill("#0B1220");
     doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(8);
     let x = 36 + 4;
     columnsWithDate.forEach((c, i) => {
-      doc.text(c.header, x, y + 7, { width: colWidths[i] - 8, align: "left" });
+      doc.text(c.header, x, y + 7, { width: colWidths[i] - 8, align: alignFor(c.key), lineBreak: false });
       x += colWidths[i];
     });
     y += 22;
@@ -241,7 +258,14 @@ export async function GET(req: NextRequest) {
         } else {
           text = v == null ? "" : String(v);
         }
-        doc.text(text, x, y + 5, { width: colWidths[i] - 8, align: "left", ellipsis: true });
+        // Constrain to a single line (height ≈ one line) so long text like the
+        // operators list is ellipsized instead of wrapping into the next row.
+        doc.text(text, x, y + 5, {
+          width: colWidths[i] - 8,
+          align: alignFor(c.key),
+          height: 10,
+          ellipsis: true,
+        });
         doc.fillColor("#0B1220");
         x += colWidths[i];
       });
@@ -266,7 +290,7 @@ export async function GET(req: NextRequest) {
           const isMoney = dataCol?.format === "money";
           text = isMoney ? `₹${v.toLocaleString("en-IN")}` : v.toLocaleString("en-IN");
         }
-        doc.text(text, x, y + 7, { width: colWidths[i] - 8, align: "left" });
+        doc.text(text, x, y + 7, { width: colWidths[i] - 8, align: alignFor(c.key), lineBreak: false });
         x += colWidths[i];
       });
     }
