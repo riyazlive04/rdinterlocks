@@ -61,8 +61,10 @@ export function ProductionForm({
   // When editing, start with manual cement so we don't overwrite the saved value.
   const [cementAuto, setCementAuto] = useState(!isEdit);
   const [ratePerBrick, setRatePerBrick] = useState<number>(initial?.ratePerBrick ?? dayShiftRate);
+  // New entries start with no operators selected (user picks who ran the line);
+  // editing keeps the saved selection.
   const [selected, setSelected] = useState<Set<string>>(
-    new Set(initial?.operatorIds ?? operators.map((o) => o.id))
+    new Set(initial?.operatorIds ?? [])
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [error, setError] = useState<string | null>(null);
