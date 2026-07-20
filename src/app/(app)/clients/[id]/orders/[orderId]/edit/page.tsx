@@ -11,11 +11,12 @@ export default async function EditOrderPage({
   params: Promise<{ id: string; orderId: string }>;
 }) {
   const { id, orderId } = await params;
-  const [client, order, sizes, ctypes, prices] = await Promise.all([
+  const [client, order, sizes, ctypes, slabSizes, prices] = await Promise.all([
     prisma.client.findUnique({ where: { id } }),
-    prisma.order.findUnique({ where: { id: orderId }, include: { items: true } }),
+    prisma.order.findUnique({ where: { id: orderId }, include: { items: true, slabItems: true } }),
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
     prisma.constructionType.findMany({ orderBy: { order: "asc" } }),
+    prisma.slabSize.findMany({ orderBy: { order: "asc" } }),
     prisma.brickPrice.findMany(),
   ]);
   if (!client || !order) notFound();
@@ -38,6 +39,7 @@ export default async function EditOrderPage({
         clientId={id}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
         ctypes={ctypes.map((c) => ({ id: c.id, name: c.name }))}
+        slabSizes={slabSizes.map((s) => ({ id: s.id, label: s.label }))}
         priceMap={Object.fromEntries(
           prices.map((p) => [`${p.brickSizeId}_${p.constructionTypeId}`, p.sellPrice])
         )}
@@ -53,6 +55,11 @@ export default async function EditOrderPage({
             quantity: it.quantity,
             pricePerBrick: it.pricePerBrick,
           })),
+          slabItems: order.slabItems.map((it) => ({
+            slabSizeId: it.slabSizeId,
+            quantity: it.quantity,
+            pricePerSlab: it.pricePerSlab,
+          })),
         }}
         submitLabel="Save changes"
         hideAdvance
@@ -63,6 +70,7 @@ export default async function EditOrderPage({
             expectedDeliveryDate: d.expectedDeliveryDate,
             notes: d.notes,
             items: d.items,
+            slabItems: d.slabItems,
           });
         }}
       />

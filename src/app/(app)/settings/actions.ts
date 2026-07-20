@@ -62,6 +62,26 @@ export async function deleteConstructionType(id: string) {
   revalidatePath("/settings/construction-types");
 }
 
+// ─── Lintel slab sizes ────────────────────────────────────────────────
+
+export async function createSlabSize(data: { label: string; order?: number }) {
+  await prisma.slabSize.create({
+    data: { label: String(data.label).trim(), order: Number(data.order ?? 0) },
+  });
+  revalidatePath("/settings/slab-sizes");
+}
+export async function updateSlabSize(id: string, data: { label: string; order?: number }) {
+  await prisma.slabSize.update({
+    where: { id },
+    data: { label: String(data.label).trim(), order: Number(data.order ?? 0) },
+  });
+  revalidatePath("/settings/slab-sizes");
+}
+export async function deleteSlabSize(id: string) {
+  await prisma.slabSize.delete({ where: { id } });
+  revalidatePath("/settings/slab-sizes");
+}
+
 // ─── Price matrix ─────────────────────────────────────────────────────
 
 const priceSchema = z.object({

@@ -107,15 +107,27 @@ const orderItemSchema = z.object({
   pricePerBrick: z.number().positive(),
 });
 
-const orderSchema = z.object({
-  clientId: z.string().min(1),
-  date: z.string(),
-  expectedDeliveryDate: z.string().optional(),
-  notes: z.string().optional(),
-  items: z.array(orderItemSchema).min(1),
-  advance: z.number().nonnegative().default(0),
-  advanceMethod: z.enum(["cash", "gpay", "bank", "upi", "cheque"]).default("cash"),
+// Lintel slab line: price per slab is optional (0 = spec only).
+const orderSlabItemSchema = z.object({
+  slabSizeId: z.string().min(1),
+  quantity: z.number().int().positive(),
+  pricePerSlab: z.number().nonnegative().default(0),
 });
+
+const orderSchema = z
+  .object({
+    clientId: z.string().min(1),
+    date: z.string(),
+    expectedDeliveryDate: z.string().optional(),
+    notes: z.string().optional(),
+    items: z.array(orderItemSchema).default([]),
+    slabItems: z.array(orderSlabItemSchema).default([]),
+    advance: z.number().nonnegative().default(0),
+    advanceMethod: z.enum(["cash", "gpay", "bank", "upi", "cheque"]).default("cash"),
+  })
+  .refine((d) => d.items.length > 0 || d.slabItems.length > 0, {
+    message: "Add at least one brick or slab item",
+  });
 
 export async function createOrder(input: z.infer<typeof orderSchema>) {
   const p = orderSchema.parse(input);
@@ -135,6 +147,14 @@ export async function createOrder(input: z.infer<typeof orderSchema>) {
           quantity: it.quantity,
           pricePerBrick: it.pricePerBrick,
           total: it.quantity * it.pricePerBrick,
+        })),
+      },
+      slabItems: {
+        create: p.slabItems.map((it) => ({
+          slabSizeId: it.slabSizeId,
+          quantity: it.quantity,
+          pricePerSlab: it.pricePerSlab,
+          total: it.quantity * it.pricePerSlab,
         })),
       },
     },
@@ -174,12 +194,17 @@ export async function createOrder(input: z.infer<typeof orderSchema>) {
 // Edit an order: update its fields and replace its line items. Advance /
 // payments are separate cash entries and are left untouched here (edit those
 // from the cash book / payments). Order status is recomputed against deliveries.
-const orderEditSchema = z.object({
-  date: z.string(),
-  expectedDeliveryDate: z.string().optional(),
-  notes: z.string().optional(),
-  items: z.array(orderItemSchema).min(1),
-});
+const orderEditSchema = z
+  .object({
+    date: z.string(),
+    expectedDeliveryDate: z.string().optional(),
+    notes: z.string().optional(),
+    items: z.array(orderItemSchema).default([]),
+    slabItems: z.array(orderSlabItemSchema).default([]),
+  })
+  .refine((d) => d.items.length > 0 || d.slabItems.length > 0, {
+    message: "Add at least one brick or slab item",
+  });
 
 export async function updateOrder(id: string, input: z.infer<typeof orderEditSchema>) {
   const p = orderEditSchema.parse(input);
@@ -190,6 +215,7 @@ export async function updateOrder(id: string, input: z.infer<typeof orderEditSch
 
   await prisma.$transaction([
     prisma.orderItem.deleteMany({ where: { orderId: id } }),
+    prisma.orderSlabItem.deleteMany({ where: { orderId: id } }),
     prisma.order.update({
       where: { id },
       data: {
@@ -203,6 +229,14 @@ export async function updateOrder(id: string, input: z.infer<typeof orderEditSch
             quantity: it.quantity,
             pricePerBrick: it.pricePerBrick,
             total: it.quantity * it.pricePerBrick,
+          })),
+        },
+        slabItems: {
+          create: p.slabItems.map((it) => ({
+            slabSizeId: it.slabSizeId,
+            quantity: it.quantity,
+            pricePerSlab: it.pricePerSlab,
+            total: it.quantity * it.pricePerSlab,
           })),
         },
       },

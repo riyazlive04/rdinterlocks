@@ -22,6 +22,7 @@ export default async function ClientDetailPage({
       orders: {
         include: {
           items: { include: { brickSize: true, constructionType: true } },
+          slabItems: { include: { slabSize: true } },
           deliveries: {
             include: {
               items: { include: { brickSize: true, constructionType: true } },
@@ -45,6 +46,7 @@ export default async function ClientDetailPage({
     refunded = 0;
   for (const o of client.orders) {
     ordered += o.items.reduce((s, i) => s + i.total, 0);
+    ordered += o.slabItems.reduce((s, i) => s + i.total, 0);
     for (const d of o.deliveries) {
       deliveredAmt += d.items.reduce((s, i) => s + i.total, 0);
       addOns += d.addOns.reduce((s, a) => s + a.total, 0);
@@ -146,7 +148,9 @@ export default async function ClientDetailPage({
                   d.returns.reduce((x, r) => x + r.brickCount, 0),
                 0
               );
-              const oTotal = o.items.reduce((s, i) => s + i.total, 0);
+              const oTotal =
+                o.items.reduce((s, i) => s + i.total, 0) +
+                o.slabItems.reduce((s, i) => s + i.total, 0);
               const oPaid = o.payments.reduce((s, p) => s + p.amount, 0);
               const oAddOns = o.deliveries.reduce(
                 (s, d) => s + d.addOns.reduce((x, a) => x + a.total, 0),
@@ -181,17 +185,28 @@ export default async function ClientDetailPage({
                       {o.status}
                     </Pill>
                   </div>
-                  <div className="bg-slate-50 rounded-lg p-2 text-[12px] mb-2">
-                    {o.items.map((it) => (
-                      <div key={it.id} className="flex justify-between">
-                        <span>
-                          {it.brickSize.label} · {it.constructionType.name} ·{" "}
-                          {formatNumber(it.quantity)} bricks @ ₹{it.pricePerBrick}
-                        </span>
-                        <span className="num font-semibold">{formatINR(it.total)}</span>
-                      </div>
-                    ))}
-                  </div>
+                  {(o.items.length > 0 || o.slabItems.length > 0) && (
+                    <div className="bg-slate-50 rounded-lg p-2 text-[12px] mb-2">
+                      {o.items.map((it) => (
+                        <div key={it.id} className="flex justify-between">
+                          <span>
+                            {it.brickSize.label} · {it.constructionType.name} ·{" "}
+                            {formatNumber(it.quantity)} bricks @ ₹{it.pricePerBrick}
+                          </span>
+                          <span className="num font-semibold">{formatINR(it.total)}</span>
+                        </div>
+                      ))}
+                      {o.slabItems.map((it) => (
+                        <div key={it.id} className="flex justify-between">
+                          <span>
+                            Lintel slab {it.slabSize.label} · {formatNumber(it.quantity)} slabs
+                            {it.pricePerSlab > 0 ? ` @ ₹${it.pricePerSlab}` : ""}
+                          </span>
+                          <span className="num font-semibold">{formatINR(it.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-baseline justify-between text-[12px] mb-3">
                     <div className="text-slate-500">
                       Delivered <span className="num font-semibold text-ink">{formatNumber(deliveredQty)}</span>
@@ -271,7 +286,8 @@ export default async function ClientDetailPage({
               orders={client.orders.map((o) => ({
                 id: o.id,
                 label: `${formatShortDate(o.date)} · ${formatINR(
-                  o.items.reduce((s, i) => s + i.total, 0)
+                  o.items.reduce((s, i) => s + i.total, 0) +
+                    o.slabItems.reduce((s, i) => s + i.total, 0)
                 )}`,
               }))}
               onSubmit={async (d) => {

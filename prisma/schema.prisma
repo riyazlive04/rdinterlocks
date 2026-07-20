@@ -381,6 +381,15 @@ model LoadingWork {
 
 // ─── Sales: Order → Deliveries → Payments ─────────────────────────────
 
+// Lintel slab sizes (e.g. 4, 5, 6). Admin-managed master data, used on orders.
+model SlabSize {
+  id    String @id @default(cuid())
+  label String @unique // e.g. "4", "5", "6"
+  order Int    @default(0)
+
+  orderSlabItems OrderSlabItem[]
+}
+
 model Order {
   id          String   @id @default(cuid())
   clientId    String
@@ -391,6 +400,7 @@ model Order {
   notes       String?
 
   items     OrderItem[]
+  slabItems OrderSlabItem[]
   deliveries Delivery[]
   payments   ClientPayment[]
 }
@@ -406,6 +416,19 @@ model OrderItem {
   quantity           Int
   pricePerBrick      Float
   total              Float
+}
+
+// A lintel-slab line on an order (kept separate from the brick OrderItem).
+// Priced per slab; pricePerSlab may be 0 to record slabs as spec-only.
+model OrderSlabItem {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  slabSizeId   String
+  slabSize     SlabSize @relation(fields: [slabSizeId], references: [id])
+  quantity     Int      // number of slabs
+  pricePerSlab Float    @default(0)
+  total        Float    @default(0)
 }
 
 model Delivery {

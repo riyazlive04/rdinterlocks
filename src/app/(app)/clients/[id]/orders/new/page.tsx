@@ -6,10 +6,11 @@ import { createOrder } from "../../../actions";
 
 export default async function NewOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [client, sizes, ctypes, prices] = await Promise.all([
+  const [client, sizes, ctypes, slabSizes, prices] = await Promise.all([
     prisma.client.findUnique({ where: { id } }),
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
     prisma.constructionType.findMany({ orderBy: { order: "asc" } }),
+    prisma.slabSize.findMany({ orderBy: { order: "asc" } }),
     prisma.brickPrice.findMany(),
   ]);
   if (!client) notFound();
@@ -32,6 +33,7 @@ export default async function NewOrderPage({ params }: { params: Promise<{ id: s
         clientId={id}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
         ctypes={ctypes.map((c) => ({ id: c.id, name: c.name }))}
+        slabSizes={slabSizes.map((s) => ({ id: s.id, label: s.label }))}
         priceMap={Object.fromEntries(
           prices.map((p) => [`${p.brickSizeId}_${p.constructionTypeId}`, p.sellPrice])
         )}

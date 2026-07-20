@@ -30,7 +30,7 @@ export default async function ClientsPage({
     include: {
       payments: true,
       orders: {
-        include: { items: true, payments: true, deliveries: { include: { items: true } } },
+        include: { items: true, slabItems: true, payments: true, deliveries: { include: { items: true } } },
       },
     },
     orderBy: { name: "asc" },
@@ -88,7 +88,10 @@ export default async function ClientsPage({
         <div className="grid sm:grid-cols-2 gap-3">
           {pageClients.map((c) => {
             const ordered = c.orders.reduce(
-              (s, o) => s + o.items.reduce((x, i) => x + i.total, 0),
+              (s, o) =>
+                s +
+                o.items.reduce((x, i) => x + i.total, 0) +
+                o.slabItems.reduce((x, i) => x + i.total, 0),
               0
             );
             const paid = c.orders.reduce(

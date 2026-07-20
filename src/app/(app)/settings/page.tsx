@@ -19,6 +19,7 @@ const sections: Array<{
     group: "Pricing",
     items: [
       { href: "/settings/brick-sizes", label: "Brick sizes", sub: '6", 6"H, 8" - add/edit', icon: "Brick" },
+      { href: "/settings/slab-sizes", label: "Lintel slab sizes", sub: "4, 5, 6 - add/edit", icon: "Brick" },
       { href: "/settings/construction-types", label: "Construction types", sub: "Room, Compound, Godown - add more", icon: "Building" },
       { href: "/settings/price-matrix", label: "Price matrix", sub: "Sell price + mason rate per size × type", icon: "Tag" },
     ],
