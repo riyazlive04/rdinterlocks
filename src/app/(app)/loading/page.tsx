@@ -34,7 +34,7 @@ export default async function LoadingPage({
   const [works, loaders, operators, employees] = await Promise.all([
     prisma.loadingWork.findMany({
       where: { date: { gte: from, lte: to }, ...workerWhere },
-      include: { loader: true, operator: true, employee: true, brickSize: true },
+      include: { loader: true, operator: true, employee: true, brickSize: true, client: true },
       orderBy: { date: "desc" },
     }),
     prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
@@ -148,6 +148,7 @@ export default async function LoadingPage({
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <Th>Date</Th>
                   <Th>Worker</Th>
+                  <Th>Customer</Th>
                   <Th>Phase</Th>
                   <Th>Size</Th>
                   <Th align="right">Bricks</Th>
@@ -162,6 +163,18 @@ export default async function LoadingPage({
                     <Td>{formatShortDate(w.date)}</Td>
                     <Td className="font-semibold">
                       {w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-"}
+                    </Td>
+                    <Td>
+                      {w.client || w.vehicleRequested ? (
+                        <div>
+                          <div>{w.client?.name ?? "-"}</div>
+                          {w.vehicleRequested && (
+                            <div className="text-[11px] text-slate-500">🚚 {w.vehicleRequested}</div>
+                          )}
+                        </div>
+                      ) : (
+                        "-"
+                      )}
                     </Td>
                     <Td>
                       <Pill tone={w.phase === "unloading" ? "warning" : "slate"}>

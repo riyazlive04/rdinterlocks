@@ -4,11 +4,12 @@ import { LoadingMultiForm } from "./multi-form";
 import { createLoadingWork } from "../actions";
 
 export default async function NewLoadingPage() {
-  const [loaders, operators, employees, sizes] = await Promise.all([
+  const [loaders, operators, employees, sizes, clients] = await Promise.all([
     prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
+    prisma.client.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
   ]);
   const workers = {
     loaders: loaders.map((l) => ({ type: "loader" as const, id: l.id, name: l.name })),
@@ -37,6 +38,7 @@ export default async function NewLoadingPage() {
       <LoadingMultiForm
         workers={workers}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
+        clients={clients.map((c) => ({ id: c.id, name: c.name, location: c.location ?? undefined }))}
         onSubmit={async (d) => {
           "use server";
           await createLoadingWork(d);

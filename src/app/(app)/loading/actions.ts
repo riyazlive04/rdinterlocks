@@ -30,6 +30,8 @@ const createSchema = z
   .object({
     date: z.string(),
     brickSizeId: z.string().optional(),
+    clientId: z.string().optional(),
+    vehicleRequested: z.string().optional(),
     brickCount: z.number().int().positive(),
     loading: crewSchema.optional(),
     unloading: crewSchema.optional(),
@@ -54,6 +56,8 @@ export async function createLoadingWork(input: z.infer<typeof createSchema>) {
           phase,
           ...workerData(w.type, w.id),
           brickSizeId: p.brickSizeId || null,
+          clientId: p.clientId || null,
+          vehicleRequested: p.vehicleRequested?.trim() || null,
           brickCount: shares[i],
           ratePerBrick: crew.ratePerBrick,
           totalAmount: shares[i] * crew.ratePerBrick,

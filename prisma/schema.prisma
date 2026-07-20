@@ -239,6 +239,7 @@ model Client {
 
   orders Order[]
   payments ClientPayment[]
+  loadingWorks LoadingWork[]
 }
 
 // ─── Operations ────────────────────────────────────────────────────────
@@ -367,6 +368,9 @@ model LoadingWork {
   employee     Employee? @relation(fields: [employeeId], references: [id])
   brickSizeId  String?
   brickSize    BrickSize? @relation(fields: [brickSizeId], references: [id])
+  clientId     String?
+  client       Client?   @relation(fields: [clientId], references: [id])
+  vehicleRequested String?  // free text: what vehicle the customer asked for
   brickCount   Int
   ratePerBrick Float
   totalAmount  Float

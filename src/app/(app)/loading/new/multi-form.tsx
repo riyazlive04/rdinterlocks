@@ -11,9 +11,12 @@ type WorkerOption = { type: WorkerType; id: string; name: string };
 type Mode = "loading" | "unloading" | "both";
 
 type Crew = { workers: Array<{ type: WorkerType; id: string }>; ratePerBrick: number };
+type ClientOption = { id: string; name: string; location?: string };
 type Sub = {
   date: string;
   brickSizeId?: string;
+  clientId?: string;
+  vehicleRequested?: string;
   brickCount: number;
   loading?: Crew;
   unloading?: Crew;
@@ -22,10 +25,12 @@ type Sub = {
 export function LoadingMultiForm({
   workers,
   sizes,
+  clients,
   onSubmit,
 }: {
   workers: { loaders: WorkerOption[]; operators: WorkerOption[]; employees: WorkerOption[] };
   sizes: Array<{ id: string; label: string }>;
+  clients: ClientOption[];
   onSubmit: (d: Sub) => Promise<void>;
 }) {
   const all = [...workers.loaders, ...workers.operators, ...workers.employees];
@@ -33,6 +38,8 @@ export function LoadingMultiForm({
 
   const [date, setDate] = useState(formatISODate(new Date()));
   const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
+  const [clientId, setClientId] = useState<string>("");
+  const [vehicleRequested, setVehicleRequested] = useState<string>("");
   const [brickCount, setBrickCount] = useState<number>(1000);
 
   const [mode, setMode] = useState<Mode>("loading");
@@ -160,6 +167,8 @@ export function LoadingMultiForm({
         await onSubmit({
           date,
           brickSizeId: brickSizeId || undefined,
+          clientId: clientId || undefined,
+          vehicleRequested: vehicleRequested.trim() || undefined,
           brickCount,
           loading: showLoad
             ? { workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: loadRate }
@@ -221,6 +230,27 @@ export function LoadingMultiForm({
             type="number"
             value={brickCount || ""}
             onChange={(e) => setBrickCount(Number(e.target.value || 0))}
+          />
+        </Field>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-3 mt-3">
+        <Field label="Customer (optional)">
+          <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+            <option value="">- none -</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.location ? `${c.name} — ${c.location}` : c.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Vehicle requested (optional)">
+          <Input
+            type="text"
+            placeholder="e.g. tractor, tipper, 6-wheel lorry"
+            value={vehicleRequested}
+            onChange={(e) => setVehicleRequested(e.target.value)}
           />
         </Field>
       </div>
