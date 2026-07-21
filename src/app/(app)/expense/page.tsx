@@ -26,7 +26,7 @@ export default async function ExpensePage({
         date: { gte: from, lte: to },
         ...(sp?.category ? { categoryId: sp.category } : {}),
       },
-      include: { category: true, vendor: true },
+      include: { category: true, vendor: true, cashEntry: true },
       orderBy: { date: "desc" },
     }),
     prisma.expenseCategory.findMany({ orderBy: { order: "asc" } }),
@@ -153,9 +153,8 @@ export default async function ExpensePage({
                     </Td>
                     <Td className="text-slate-600">{e.vendor?.name ?? "-"}</Td>
                     <Td>
-                      <span className="capitalize text-slate-600 text-[12px]">
-                        {/* method comes from the linked cashEntry; show "-" when not loaded */}
-                        cash
+                      <span className="text-slate-600 text-[12px]">
+                        {methodLabel(e.cashEntry?.method)}
                       </span>
                     </Td>
                     <Td align="right" className="num font-bold text-brand-red">
@@ -174,6 +173,19 @@ export default async function ExpensePage({
       <Pagination page={page} totalPages={totalPages} />
     </>
   );
+}
+
+// Payment method is stored on the linked cash entry, not on the expense row.
+const METHOD_LABELS: Record<string, string> = {
+  cash: "Cash",
+  gpay: "GPay",
+  upi: "UPI",
+  bank: "Bank",
+  cheque: "Cheque",
+};
+function methodLabel(m?: string | null) {
+  if (!m) return "-";
+  return METHOD_LABELS[m] ?? m;
 }
 
 function Th({ children, align }: { children: React.ReactNode; align?: "right" | "left" | "center" }) {
