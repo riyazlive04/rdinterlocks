@@ -286,8 +286,14 @@ model StockBatch {
   count             Int
   remaining         Int
   stage             String   @default("produced") // produced | drying | curing | ready | dispatched
+  // production = made here, so it ages produced -> drying -> curing -> ready.
+  // return = bricks that came back on a tipper. They were cured long ago, so
+  // they count as READY immediately instead of being aged from producedAt.
+  source            String   @default("production") // production | return
   producedAt        DateTime @default(now())
   stageChangedAt    DateTime @default(now())
+
+  tipperReturn      TipperLoad?
 
   @@index([stage])
 }
@@ -328,6 +334,11 @@ model TipperLoad {
   toLocation   String?
   rentAmount   Float    @default(0) // earned (or paid if vendor)
   rentDirection String  @default("in") // in (we earn) | out (we pay vendor)
+  // Bricks brought BACK on this trip (customer return / undelivered load).
+  // They go straight back into sellable stock via the linked return batch.
+  returnBricks  Int     @default(0)
+  returnBatchId String? @unique
+  returnBatch   StockBatch? @relation(fields: [returnBatchId], references: [id])
   notes        String?
   cashEntryId  String?  @unique
   cashEntry    CashEntry? @relation(fields: [cashEntryId], references: [id])

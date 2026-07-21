@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Button, Card, Field, Input, Select } from "@/components/ui";
 import { formatISODate } from "@/lib/format";
 
@@ -15,6 +15,7 @@ type Sub = {
   toLocation?: string;
   rentAmount: number;
   rentDirection: "in" | "out";
+  returnBricks: number;
   notes?: string;
   method: "cash" | "gpay" | "bank" | "upi" | "cheque";
 };
@@ -22,30 +23,45 @@ type Sub = {
 export function TipperForm({
   tippers,
   sizes,
+  initial,
+  submitLabel,
   onSubmit,
 }: {
   tippers: Array<{ id: string; name: string; ownership: string; vendorName: string | null }>;
   sizes: Array<{ id: string; label: string }>;
+  initial?: Partial<Sub>;
+  submitLabel?: string;
   onSubmit: (d: Sub) => Promise<void>;
 }) {
-  const [date, setDate] = useState(formatISODate(new Date()));
-  const [tipperId, setTipperId] = useState(tippers[0]?.id ?? "");
-  const [loadType, setLoadType] = useState<"bricks" | "material">("bricks");
-  const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
-  const [materialName, setMaterialName] = useState("");
-  const [quantity, setQuantity] = useState<number>(1000);
-  const [unit, setUnit] = useState("pcs");
-  const [fromLocation, setFromLocation] = useState("Factory");
-  const [toLocation, setToLocation] = useState("");
-  const [rentAmount, setRentAmount] = useState<number>(0);
-  const [rentDirection, setRentDirection] = useState<"in" | "out">("in");
-  const [notes, setNotes] = useState("");
-  const [method, setMethod] = useState<Sub["method"]>("cash");
+  const isEdit = !!initial;
+  const [date, setDate] = useState(initial?.date ?? formatISODate(new Date()));
+  const [tipperId, setTipperId] = useState(initial?.tipperId ?? tippers[0]?.id ?? "");
+  const [loadType, setLoadType] = useState<"bricks" | "material">(initial?.loadType ?? "bricks");
+  const [brickSizeId, setBrickSizeId] = useState(initial?.brickSizeId ?? sizes[0]?.id ?? "");
+  const [materialName, setMaterialName] = useState(initial?.materialName ?? "");
+  const [quantity, setQuantity] = useState<number>(initial?.quantity ?? 1000);
+  const [unit, setUnit] = useState(initial?.unit ?? "pcs");
+  const [fromLocation, setFromLocation] = useState(initial?.fromLocation ?? "Factory");
+  const [toLocation, setToLocation] = useState(initial?.toLocation ?? "");
+  const [rentAmount, setRentAmount] = useState<number>(initial?.rentAmount ?? 0);
+  const [rentDirection, setRentDirection] = useState<"in" | "out">(initial?.rentDirection ?? "in");
+  const [returnBricks, setReturnBricks] = useState<number>(initial?.returnBricks ?? 0);
+  const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [method, setMethod] = useState<Sub["method"]>(initial?.method ?? "cash");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // On an edit these two effects would clobber the saved values on mount, so
+  // they skip their first run and only apply once the user changes something.
+  const skipRent = useRef(isEdit);
+  const skipUnit = useRef(isEdit);
+
   // Default rent direction by tipper ownership
   useEffect(() => {
+    if (skipRent.current) {
+      skipRent.current = false;
+      return;
+    }
     const t = tippers.find((x) => x.id === tipperId);
     if (!t) return;
     setRentDirection(t.ownership === "own" ? "in" : "out");
@@ -53,6 +69,10 @@ export function TipperForm({
 
   // Default unit when load type changes
   useEffect(() => {
+    if (skipUnit.current) {
+      skipUnit.current = false;
+      return;
+    }
     setUnit(loadType === "bricks" ? "pcs" : "unit");
   }, [loadType]);
 
@@ -61,6 +81,7 @@ export function TipperForm({
     if (!quantity || quantity <= 0) return setError("Enter quantity");
     if (loadType === "bricks" && !brickSizeId) return setError("Pick a brick size");
     if (loadType === "material" && !materialName.trim()) return setError("Enter material name");
+    if (returnBricks < 0) return setError("Return bricks can't be negative");
     startTransition(async () => {
       try {
         await onSubmit({
@@ -75,6 +96,7 @@ export function TipperForm({
           toLocation: toLocation.trim() || undefined,
           rentAmount,
           rentDirection,
+          returnBricks: loadType === "bricks" ? returnBricks : 0,
           notes: notes.trim() || undefined,
           method,
         });
@@ -135,6 +157,16 @@ export function TipperForm({
         <Field label="Unit">
           <Input value={unit} onChange={(e) => setUnit(e.target.value)} />
         </Field>
+        {loadType === "bricks" && (
+          <Field label="Return bricks (came back)">
+            <Input
+              type="number"
+              value={returnBricks}
+              onChange={(e) => setReturnBricks(Number(e.target.value || 0))}
+              placeholder="0"
+            />
+          </Field>
+        )}
         <Field label="From">
           <Input
             value={fromLocation}
@@ -178,10 +210,15 @@ export function TipperForm({
           <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
         </Field>
       </div>
+      {loadType === "bricks" && returnBricks > 0 && (
+        <div className="text-[11px] text-slate-500 mt-2">
+          {returnBricks.toLocaleString("en-IN")} returned bricks go straight back into ready stock.
+        </div>
+      )}
       {error && <div className="text-xs text-red-600 mt-2">{error}</div>}
       <div className="mt-4">
         <Button onClick={submit} disabled={isPending} variant="primary" size="lg">
-          {isPending ? "Saving…" : "Save load"}
+          {isPending ? "Saving…" : submitLabel ?? "Save load"}
         </Button>
       </div>
     </Card>

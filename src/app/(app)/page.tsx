@@ -41,7 +41,7 @@ export default async function DashboardPage() {
     }),
     prisma.stockBatch.findMany({
       where: { remaining: { gt: 0 } },
-      select: { producedAt: true, remaining: true },
+      select: { producedAt: true, remaining: true, source: true },
     }),
     prisma.cashEntry.findMany(),
     prisma.order.findMany({
@@ -87,7 +87,12 @@ export default async function DashboardPage() {
   const curingDays = settings?.curingDays ?? 10;
   const stageMap: Record<string, number> = { produced: 0, drying: 0, curing: 0, ready: 0 };
   for (const b of stockBatches) {
-    const st = stageForAge(b.producedAt, dryingDays, curingDays, todayEnd);
+    // Returned bricks were cured long before they came back, so they're
+    // sellable right away rather than re-ageing from their return date.
+    const st =
+      b.source === "return"
+        ? "ready"
+        : stageForAge(b.producedAt, dryingDays, curingDays, todayEnd);
     stageMap[st] += b.remaining;
   }
 

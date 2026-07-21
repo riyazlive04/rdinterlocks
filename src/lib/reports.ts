@@ -343,7 +343,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         include: { tipper: true, vendor: true, brickSize: true },
       });
       const moneyKeys = ["earned", "paid"];
-      const numberKeys = ["qty"];
+      const numberKeys = ["qty", "returned"];
       const { sections, totals } = groupByDate(
         rows,
         (l) => ({
@@ -353,6 +353,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
             owner: l.tipper.ownership === "own" ? "RD" : l.vendor?.name ?? "vendor",
             load: l.loadType === "bricks" ? `${l.brickSize?.label ?? "-"} bricks` : l.materialName ?? "Material",
             qty: l.quantity,
+            returned: l.returnBricks,
             route: `${l.fromLocation ?? "-"} → ${l.toLocation ?? "-"}`,
             earned: l.rentDirection === "in" ? l.rentAmount : 0,
             paid: l.rentDirection === "out" ? l.rentAmount : 0,
@@ -371,6 +372,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           { key: "owner", header: "Owner", format: "muted", width: "80px" },
           { key: "load", header: "Load" },
           { key: "qty", header: "Qty", format: "number", align: "right" },
+          { key: "returned", header: "Returned", format: "number", align: "right" },
           { key: "route", header: "Route", format: "muted" },
           { key: "earned", header: "Earned", format: "money", align: "right" },
           { key: "paid", header: "Paid", format: "money", align: "right" },

@@ -163,6 +163,11 @@ export default async function TipperPage({
                     </Td>
                     <Td align="right" className="num">
                       {formatNumber(l.quantity)} <span className="text-[11px] text-slate-500">{l.unit}</span>
+                      {l.returnBricks > 0 && (
+                        <div className="text-[11px] font-semibold text-emerald-700">
+                          +{formatNumber(l.returnBricks)} returned
+                        </div>
+                      )}
                     </Td>
                     <Td className="text-slate-600">
                       <span className="text-[12px]">
@@ -184,7 +189,16 @@ export default async function TipperPage({
                       )}
                     </Td>
                     <Td align="right">
-                      <DeleteTipperLoad id={l.id} />
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/tipper/${l.id}/edit`}
+                          className="w-8 h-8 rounded-md hover:bg-slate-100 inline-flex items-center justify-center text-slate-500"
+                          title="Edit"
+                        >
+                          <Icon.Pencil size={14} />
+                        </Link>
+                        <DeleteTipperLoad id={l.id} />
+                      </div>
                     </Td>
                   </tr>
                 ))}
