@@ -5,6 +5,7 @@ import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate } from "@/lib/format";
 import { PaymentForm } from "./payment-form";
+import { DeleteOrder } from "./delete-order";
 import { recordPayment } from "../actions";
 
 export default async function ClientDetailPage({
@@ -271,6 +272,12 @@ export default async function ClientDetailPage({
                     >
                       Edit order
                     </Link>
+                    <DeleteOrder
+                      id={o.id}
+                      deliveries={o.deliveries.length}
+                      payments={o.payments.length}
+                      paid={oPaid}
+                    />
                   </div>
                 </Card>
               );

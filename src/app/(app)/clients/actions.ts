@@ -249,19 +249,33 @@ export async function updateOrder(id: string, input: z.infer<typeof orderEditSch
   redirect(`/clients/${existing.clientId}`);
 }
 
+// Delete an order and everything hanging off it. Items, slab items and
+// deliveries cascade from the order itself; payments do NOT — their orderId is
+// optional, so they'd survive with orderId set to null and keep counting
+// toward the client's paid total while their cash entry was gone. So the
+// payments and their cash entries are removed explicitly, in one transaction.
 export async function deleteOrder(id: string) {
   const order = await prisma.order.findUnique({
     where: { id },
-    include: { payments: true, deliveries: true },
+    include: { payments: true },
   });
   if (!order) return;
-  // Remove payments + their cash entries
-  for (const pay of order.payments) {
-    if (pay.cashEntryId) await prisma.cashEntry.delete({ where: { id: pay.cashEntryId } });
-  }
-  await prisma.order.delete({ where: { id } });
+  const cashEntryIds = order.payments
+    .map((p) => p.cashEntryId)
+    .filter((x): x is string => !!x);
+
+  await prisma.$transaction([
+    prisma.clientPayment.deleteMany({ where: { orderId: id } }),
+    ...(cashEntryIds.length
+      ? [prisma.cashEntry.deleteMany({ where: { id: { in: cashEntryIds } } })]
+      : []),
+    prisma.order.delete({ where: { id } }),
+  ]);
+
   revalidatePath("/clients");
-  if (order) revalidatePath(`/clients/${order.clientId}`);
+  revalidatePath(`/clients/${order.clientId}`);
+  revalidatePath("/cash");
+  revalidatePath("/");
 }
 
 // ─── Deliveries (with add-ons + returns) ──────────────────────────────
