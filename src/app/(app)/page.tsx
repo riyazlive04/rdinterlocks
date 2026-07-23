@@ -34,6 +34,8 @@ export default async function DashboardPage() {
     settings,
     weekProduction,
     overdueDispatches,
+    dueLeads,
+    openLeadCount,
   ] = await Promise.all([
     prisma.productionEntry.aggregate({
       where: { date: { gte: today, lte: todayEnd } },
@@ -74,6 +76,12 @@ export default async function DashboardPage() {
       },
       include: { client: true },
     }),
+    prisma.lead.findMany({
+      where: { status: "open", followUpDate: { lte: todayEnd } },
+      orderBy: { followUpDate: "asc" },
+      select: { id: true, customerName: true, place: true, followUpDate: true },
+    }),
+    prisma.lead.count({ where: { status: "open" } }),
   ]);
 
   const cashIn = cashEntries.filter((e) => e.direction === "in").reduce((s, e) => s + e.amount, 0);
@@ -110,15 +118,26 @@ export default async function DashboardPage() {
     href: string;
   };
   const alerts: Alert[] = [];
-  for (const ms of materialStock) {
-    if (ms.reorderAt > 0 && ms.quantity <= ms.reorderAt) {
-      alerts.push({
-        severity: ms.quantity <= ms.reorderAt / 2 ? "high" : "medium",
-        title: `Low ${ms.material.name} stock`,
-        sub: `${ms.quantity.toFixed(1)} ${ms.material.unit} left · reorder at ${ms.reorderAt}`,
-        href: "/settings/materials",
-      });
-    }
+
+  // Things with a deadline come first — a missed follow-up or a late delivery
+  // costs an order today, whereas a reorder nudge can wait an hour.
+  for (const l of dueLeads.slice(0, 3)) {
+    alerts.push({
+      severity: "high",
+      title: `Follow up ${l.customerName || "unnamed lead"}`,
+      sub: `${l.place || "Place not captured"} · due ${
+        l.followUpDate?.toLocaleDateString("en-IN") ?? "-"
+      }`,
+      href: `/leads/${l.id}`,
+    });
+  }
+  if (dueLeads.length > 3) {
+    alerts.push({
+      severity: "medium",
+      title: `${dueLeads.length - 3} more follow-ups due`,
+      sub: `${openLeadCount} open leads in total`,
+      href: "/leads?due=1",
+    });
   }
   for (const o of overdueDispatches) {
     alerts.push({
@@ -137,6 +156,39 @@ export default async function DashboardPage() {
       href: "/employees",
     });
   }
+
+  // Low materials are collapsed into one row once there are several. Listing
+  // them individually used to fill all six visible slots on a factory that is
+  // simply running its stock low, hiding every other alert behind it.
+  const lowMaterials = materialStock.filter(
+    (ms) => ms.reorderAt > 0 && ms.quantity <= ms.reorderAt
+  );
+  if (lowMaterials.length > 2) {
+    const critical = lowMaterials.filter((ms) => ms.quantity <= ms.reorderAt / 2).length;
+    alerts.push({
+      severity: critical > 0 ? "high" : "medium",
+      title: `${lowMaterials.length} materials low on stock`,
+      sub: `${lowMaterials
+        .slice(0, 3)
+        .map((ms) => ms.material.name)
+        .join(", ")}${lowMaterials.length > 3 ? "…" : ""}${critical > 0 ? ` · ${critical} critical` : ""}`,
+      href: "/settings/materials",
+    });
+  } else {
+    for (const ms of lowMaterials) {
+      alerts.push({
+        severity: ms.quantity <= ms.reorderAt / 2 ? "high" : "medium",
+        title: `Low ${ms.material.name} stock`,
+        sub: `${ms.quantity.toFixed(1)} ${ms.material.unit} left · reorder at ${ms.reorderAt}`,
+        href: "/settings/materials",
+      });
+    }
+  }
+
+  // Only six are shown, so make sure the six are the most severe. Array.sort is
+  // stable, which keeps the deadline-first ordering above within each severity.
+  const severityRank = { high: 0, medium: 1, low: 2 } as const;
+  alerts.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]);
 
   // 7-day production chart
   const days: Array<{ key: string; label: string; bricks: number }> = [];
@@ -176,10 +228,10 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-5">
         {[
           { label: "Production", href: "/production/new", icon: "Brick", tone: "red" },
+          { label: "Leads", href: "/leads", icon: "Mic", tone: "blue" },
           { label: "Sale", href: "/clients", icon: "Receipt", tone: "blue" },
           { label: "Cash", href: "/cash/new", icon: "Cash", tone: "ink" },
           { label: "Mason", href: "/mason/new", icon: "Hammer", tone: "blue" },
-          { label: "Tipper", href: "/tipper/new", icon: "Truck", tone: "ink" },
           { label: "Expense", href: "/expense/new", icon: "Tag", tone: "red" },
         ].map((q) => {
           const Ic = Icon[q.icon as IconName];
