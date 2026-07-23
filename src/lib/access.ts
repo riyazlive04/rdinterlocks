@@ -5,6 +5,7 @@
 export const ACCESS_AREAS = [
   { key: "production", label: "Production" },
   { key: "day", label: "Daily entry" },
+  { key: "leads", label: "Leads (call enquiries)" },
   { key: "sales", label: "Clients & Sales" },
   { key: "deliveries", label: "Deliveries" },
   { key: "tipper", label: "Tipper" },

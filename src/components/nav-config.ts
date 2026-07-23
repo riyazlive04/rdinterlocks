@@ -28,6 +28,13 @@ export const primaryNav: NavItem[] = [
     matches: ["/day"],
   },
   {
+    id: "leads",
+    label: "Leads",
+    href: "/leads",
+    icon: "Mic",
+    matches: ["/leads"],
+  },
+  {
     id: "sales",
     label: "Clients & Sales",
     href: "/clients",
