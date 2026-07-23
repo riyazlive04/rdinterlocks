@@ -60,6 +60,97 @@ Everything that varies sits in Settings — admin can add or change any of:
 - Vendors (e.g. AVM) and Tippers (own + vendor)
 - Security (change password)
 
+## Integration API — lead import
+
+`POST /api/v1/leads/import` receives one structured lead extracted from a recorded
+call by the Transcriber app.
+
+**Auth.** Set `INTEGRATION_API_KEYS` in the environment (see `.env.example`), then send
+either header:
+
+```
+Authorization: Bearer <key>
+X-API-Key: <key>
+```
+
+Keys are a comma-separated `label:key` list; the label is written to the audit log so a
+credential can be traced and revoked. Listing two keys is how you rotate without downtime.
+
+**Request.**
+
+```bash
+curl -X POST https://<host>/api/v1/leads/import \
+  -H "Authorization: Bearer $INTEGRATION_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "callId": "CALL-9001",
+    "customerName": "Ravi Kumar",
+    "place": "Salem",
+    "typeOfBricks": "6\"",
+    "numberOfBricks": 12000,
+    "typeOfConstruction": "Compound wall",
+    "costPerBrick": 32,
+    "totalBudget": "3.84 lakh",
+    "notes": "Wants delivery before Deepavali",
+    "followUpDate": "05/08/2026",
+    "quotationStage": "quote sent"
+  }'
+```
+
+Field names are matched case- and separator-insensitively, so `customerName`,
+`customer_name` and `Customer Name` are all the same field. Common aliases are accepted
+too (`location` → place, `qty` → numberOfBricks, `rate` → costPerBrick). Values may be
+messy: `"₹1,20,000"`, `"2 lakh"` and `12000` all parse, and `05/08/2026` is read
+day-first.
+
+**Responses.**
+
+| Code | Meaning |
+|---|---|
+| `201` | New `callId` — lead created |
+| `200` | Known `callId` — lead updated (idempotent re-send) |
+| `400` | Body isn't valid JSON / isn't an object / has no `callId` |
+| `401` | Missing or invalid API key |
+| `409` | Lead already converted to a client — import refused, no overwrite |
+| `413` | Body over 1 MB |
+| `429` | Rate limit exceeded — see `Retry-After` |
+| `500` | Server error; retry with the same `callId` |
+
+```json
+{
+  "ok": true, "apiVersion": "v1", "requestId": "…", "outcome": "created",
+  "lead": { "id": "…", "callId": "CALL-9001", "…": "…" },
+  "missingFields": ["followUpDate"],
+  "warnings": [],
+  "extraFields": ["phone", "recordingUrl"]
+}
+```
+
+**Behaviour worth knowing.**
+
+- **Partial data is accepted.** Only `callId` is required — it is the idempotency key.
+  Any other missing field is stored as `""` (text) or `null` (number/date) and listed
+  back in `missingFields`. The request is never rejected for incompleteness.
+- **Re-imports merge.** A field is overwritten only when the new payload has a non-empty
+  value for it, so a later thinner extraction can't blank out good data. Add
+  `?mode=replace` to overwrite unconditionally.
+- **Unknown fields survive.** Anything not modelled yet is kept in the lead's `extra`
+  JSON, so the Transcriber can start sending a new field before this app understands it.
+  Adding a field is never a breaking change; anything that *would* break a caller ships
+  as `/api/v2/…` instead.
+- **Every request is audited.** The verbatim body, outcome, status code and key label go
+  into `LeadImport` — including rejected and malformed ones. Throttled requests are the
+  one exception: auditing them would let a flood fill the very table used to investigate it.
+- **Rate limited.** Defaults: 60 requests/min per API key, 120/min per IP, and 10 failed
+  auth attempts per IP per 15 min before that source is cut off. All three are tunable via
+  env vars (see `.env.example`). Every response carries `X-RateLimit-*`; a 429 adds
+  `Retry-After`. A valid key is never blocked by another caller's failed attempts.
+
+  Counters are held per server instance, so on Vercel's serverless functions the effective
+  ceiling is roughly `limit × live instances` — enough to stop a stuck retry loop, but not
+  a hard distributed guarantee. For that, swap the two functions in `src/lib/rate-limit.ts`
+  for a Redis/Upstash `INCR`; nothing else needs to change.
+
 ## Database commands
 
 ```bash

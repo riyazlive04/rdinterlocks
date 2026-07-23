@@ -96,6 +96,7 @@ model BrickSize {
   deliveryItems     DeliveryItem[]
   tipperLoads       TipperLoad[]
   recipes           MaterialRecipe[]
+  leads             Lead[]
 }
 
 model ConstructionType {
@@ -107,6 +108,7 @@ model ConstructionType {
   masonWorks     MasonWork[]
   orderItems     OrderItem[]
   deliveryItems  DeliveryItem[]
+  leads          Lead[]
 }
 
 // Pricing matrix: each (size × constructionType) has sellPrice + masonRate
@@ -240,6 +242,7 @@ model Client {
   orders Order[]
   payments ClientPayment[]
   loadingWorks LoadingWork[]
+  leads Lead[]
 }
 
 // ─── Operations ────────────────────────────────────────────────────────
@@ -603,6 +606,93 @@ model Advance {
   cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
 
   @@index([date])
+}
+
+// ─── Leads (inbound enquiries from the Transcriber integration) ───────
+
+// A pre-sale enquiry, extracted from a recorded call by the Transcriber app
+// and pushed to POST /api/v1/leads/import.
+//
+// Everything here is best-effort: a transcript may not mention the place, the
+// quantity, or the price. Missing text fields are stored as "" and missing
+// numbers/dates as null, so a partial extraction is still captured rather than
+// rejected. Whatever the extractor DID hear is never lost — the verbatim
+// payload of every request is kept in LeadImport.
+model Lead {
+  id     String @id @default(cuid())
+  // Idempotency key: one recorded call = one lead. Re-sending the same callId
+  // (e.g. after the Transcriber re-runs its extraction) updates this row
+  // instead of creating a duplicate.
+  callId String @unique
+
+  customerName     String    @default("")
+  place            String    @default("")
+  brickType        String    @default("") // as spoken, e.g. "6 inch"
+  brickCount       Int?
+  constructionType String    @default("") // as spoken, e.g. "compound wall"
+  costPerBrick     Float?
+  totalBudget      Float?
+  notes            String    @default("")
+  followUpDate     DateTime?
+  // new | quoted | negotiating | won | lost. Unrecognised values are stored
+  // verbatim so the Transcriber can introduce a new stage without a deploy.
+  quotationStage   String    @default("new")
+
+  // Best-effort links to master data, set when the spoken text matches a known
+  // brick size / construction type. Null when it doesn't — the free text above
+  // stays the source of truth and conversion falls back to it.
+  brickSizeId        String?
+  brickSize          BrickSize?        @relation(fields: [brickSizeId], references: [id])
+  constructionTypeId String?
+  constructionTypeRef ConstructionType? @relation(fields: [constructionTypeId], references: [id])
+
+  // Fields the Transcriber sends that this schema version doesn't model yet.
+  // Lets new extracted fields ship without a migration or a broken integration.
+  extra Json?
+
+  source String @default("transcriber")
+  status String @default("open") // open | converted | discarded
+
+  // Set when the lead becomes a real customer. A converted lead is locked:
+  // further imports for the same callId are refused with 409 rather than
+  // silently overwriting a record the office has already acted on.
+  convertedClientId String?
+  convertedClient   Client?   @relation(fields: [convertedClientId], references: [id])
+  convertedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  imports LeadImport[]
+
+  @@index([quotationStage])
+  @@index([followUpDate])
+  @@index([createdAt])
+  @@index([status])
+}
+
+// Append-only audit of every import request, including the ones that were
+// rejected or refused. `payload` is the body exactly as received, so a bad
+// extraction can always be replayed or diffed after the fact.
+model LeadImport {
+  id     String  @id @default(cuid())
+  callId String?
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  payload    Json // verbatim request body
+  outcome    String // created | updated | rejected | conflict | error
+  statusCode Int
+  message    String @default("")
+  // Which credential was used, for revocation/forensics. Never the key itself.
+  apiKeyLabel String @default("")
+  requestId   String
+
+  receivedAt DateTime @default(now())
+
+  @@index([callId])
+  @@index([receivedAt])
+  @@index([outcome])
 }
 
 // ─── Unified Cashbook ─────────────────────────────────────────────────
