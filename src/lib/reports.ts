@@ -177,91 +177,133 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
     }
 
     case "sales": {
-      const deliveries = await prisma.delivery.findMany({
+      // Order-based sales ledger: every order in the range shows up — whether
+      // or not it has been delivered yet — with ordered value, paid and
+      // pending. Deliveries, add-ons and returns hang under each order as
+      // sub-detail rows. Money math mirrors the client-detail page exactly
+      // (Amount = ordered + add-ons − returns; Pending = Amount − Paid).
+      const orders = await prisma.order.findMany({
         where: {
           date: dateRange,
-          ...(filter.clientId ? { order: { clientId: filter.clientId } } : {}),
+          ...(filter.clientId ? { clientId: filter.clientId } : {}),
+          ...(filter.brickSizeId
+            ? { items: { some: { brickSizeId: filter.brickSizeId } } }
+            : {}),
         },
         include: {
-          order: { include: { client: true, payments: true } },
+          client: true,
           items: { include: { brickSize: true, constructionType: true } },
-          addOns: true,
-          returns: true,
+          payments: true,
+          deliveries: {
+            include: {
+              items: { include: { brickSize: true } },
+              addOns: true,
+              returns: true,
+            },
+            orderBy: { date: "desc" },
+          },
         },
       });
       const moneyKeys = ["amount", "paid", "pending"];
       const numberKeys = ["qty"];
 
-      const items = deliveries.map((d) => {
-        // Roll up items, add-ons, returns into a parent + children row
-        const itemTotal = d.items.reduce((s, i) => s + i.total, 0);
-        const addOnTotal = d.addOns.reduce((s, a) => s + a.total, 0);
-        const refundTotal = d.returns.reduce((s, r) => s + r.refundAmount, 0);
-        const lineTotal = itemTotal + addOnTotal - refundTotal;
-        const orderPaid = d.order.payments.reduce((s, p) => s + p.amount, 0);
-        const orderTotal = d.order.payments.length
-          ? d.order.payments[0].orderId
-          : null;
-        // For the per-delivery view we don't have allocation of the order's
-        // payments to this specific delivery - show line total and a
-        // "running" pending against the order as a hint.
-        const orderItemsTotal = d.order ? d.order.payments.reduce((s) => s, 0) : 0;
-        void orderTotal;
-        void orderItemsTotal;
+      const shortDate = (d: Date) => `${d.getDate()} ${monthShort[d.getMonth()]}`;
+
+      const items = orders.map((o) => {
+        const orderTotal = o.items.reduce((s, i) => s + i.total, 0);
+        const orderedQty = o.items.reduce((s, i) => s + i.quantity, 0);
+        const addOnTotal = o.deliveries.reduce(
+          (s, d) => s + d.addOns.reduce((x, a) => x + a.total, 0),
+          0
+        );
+        const refundTotal = o.deliveries.reduce(
+          (s, d) => s + d.returns.reduce((x, r) => x + r.refundAmount, 0),
+          0
+        );
+        const paid = o.payments.reduce((s, p) => s + p.amount, 0);
+        // Total billed value of the order (add-ons carry on children so the
+        // grand total still adds up; keep the parent on the plain order value).
+        const billed = orderTotal + addOnTotal - refundTotal;
 
         const parentRow: LedgerRow = {
-          id: d.id,
+          id: o.id,
           cells: {
-            client: d.order.client.name,
-            location: d.order.client.location ?? "",
-            line: d.items
-              .map((i) => `${i.quantity.toLocaleString("en-IN")} × ${i.brickSize.label} ${i.constructionType.name}`)
+            client: o.client.name,
+            location: o.client.location ?? "",
+            line: o.items
+              .map(
+                (i) =>
+                  `${i.quantity.toLocaleString("en-IN")} × ${i.brickSize.label} ${i.constructionType.name}`
+              )
               .join(", "),
-            qty: d.items.reduce((s, i) => s + i.quantity, 0),
-            rate: d.items[0] ? `₹${d.items[0].pricePerBrick}` : "-",
-            amount: lineTotal,
-            paid: orderPaid,
-            pending: Math.max(0, lineTotal - orderPaid),
-            truck: d.truckPlate ?? "-",
+            qty: orderedQty,
+            rate: o.items[0] ? `₹${o.items[0].pricePerBrick}` : "-",
+            amount: orderTotal,
+            paid,
+            pending: Math.max(0, billed - paid),
+            status: o.status,
           },
           children: [],
         };
 
-        for (const a of d.addOns) {
+        // Deliveries (informational — money stays on the order/add-on rows so
+        // nothing is double-counted in the totals).
+        for (const d of o.deliveries) {
+          const delivered = d.items.reduce((s, i) => s + i.quantity, 0);
           parentRow.children!.push({
-            id: a.id,
-            emphasis: "credit",
+            id: `d-${d.id}`,
             cells: {
               client: "",
               location: "",
-              line: `+ ${a.name} (${a.quantity} ${a.unit} @ ₹${a.pricePerUnit})`,
+              line: `→ Delivered ${delivered.toLocaleString("en-IN")} bricks · ${shortDate(
+                d.date
+              )}${d.truckPlate ? ` · ${d.truckPlate}` : ""}`,
               qty: 0,
               rate: "",
-              amount: a.total,
+              amount: 0,
               paid: 0,
               pending: 0,
-              truck: "",
+              status: "",
             },
           });
+          for (const a of d.addOns) {
+            parentRow.children!.push({
+              id: a.id,
+              emphasis: "credit",
+              cells: {
+                client: "",
+                location: "",
+                line: `+ ${a.name} (${a.quantity} ${a.unit} @ ₹${a.pricePerUnit})`,
+                qty: 0,
+                rate: "",
+                amount: a.total,
+                paid: 0,
+                pending: 0,
+                status: "",
+              },
+            });
+          }
+          for (const r of d.returns) {
+            parentRow.children!.push({
+              id: r.id,
+              emphasis: "debit",
+              cells: {
+                client: "",
+                location: "",
+                line: `− Return ${r.brickCount.toLocaleString("en-IN")} bricks${
+                  r.notes ? ` (${r.notes})` : ""
+                }`,
+                qty: 0,
+                rate: "",
+                amount: -r.refundAmount,
+                paid: 0,
+                pending: 0,
+                status: "",
+              },
+            });
+          }
         }
-        for (const r of d.returns) {
-          parentRow.children!.push({
-            id: r.id,
-            emphasis: "debit",
-            cells: {
-              client: "",
-              location: "",
-              line: `− Return ${r.brickCount.toLocaleString("en-IN")} bricks${r.notes ? ` (${r.notes})` : ""}`,
-              qty: -r.brickCount,
-              rate: "",
-              amount: -r.refundAmount,
-              paid: 0,
-              pending: 0,
-              truck: "",
-            },
-          });
-        }
-        return { date: d.date, row: parentRow };
+        return { date: o.date, row: parentRow };
       });
 
       const { sections, totals } = groupByDate(
@@ -272,8 +314,8 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
       );
 
       return {
-        title: "Sales (Deliveries)",
-        unit: "deliveries",
+        title: "Sales (Orders)",
+        unit: "orders",
         moneyKeys,
         numberKeys,
         columns: [
@@ -285,7 +327,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           { key: "amount", header: "Amount", format: "money", align: "right" },
           { key: "paid", header: "Paid", format: "money", align: "right" },
           { key: "pending", header: "Pending", format: "money", align: "right" },
-          { key: "truck", header: "Truck", format: "mono", width: "100px" },
+          { key: "status", header: "Status", format: "muted", width: "90px" },
         ],
         sections,
         totals,
