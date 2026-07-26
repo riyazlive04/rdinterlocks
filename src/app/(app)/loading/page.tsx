@@ -34,7 +34,7 @@ export default async function LoadingPage({
   const [works, loaders, operators, employees] = await Promise.all([
     prisma.loadingWork.findMany({
       where: { date: { gte: from, lte: to }, ...workerWhere },
-      include: { loader: true, operator: true, employee: true, brickSize: true, client: true },
+      include: { loader: true, operator: true, employee: true, brickSize: true, client: true, tipper: true },
       orderBy: { date: "desc" },
     }),
     prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
@@ -165,9 +165,12 @@ export default async function LoadingPage({
                       {w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-"}
                     </Td>
                     <Td>
-                      {w.client || w.vehicleRequested ? (
+                      {w.client || w.vehicleRequested || w.tipper ? (
                         <div>
                           <div>{w.client?.name ?? "-"}</div>
+                          {w.tipper && (
+                            <div className="text-[11px] text-slate-500">🛻 {w.tipper.name}</div>
+                          )}
                           {w.vehicleRequested && (
                             <div className="text-[11px] text-slate-500">🚚 {w.vehicleRequested}</div>
                           )}
@@ -181,7 +184,7 @@ export default async function LoadingPage({
                         {w.phase === "unloading" ? "Unloading" : "Loading"}
                       </Pill>
                     </Td>
-                    <Td>{w.brickSize?.label ?? "-"}</Td>
+                    <Td>{w.loadType === "lintel" ? "Lintel slab" : w.brickSize?.label ?? "-"}</Td>
                     <Td align="right" className="num">{formatNumber(w.brickCount)}</Td>
                     <Td align="right" className="num">₹{w.ratePerBrick}</Td>
                     <Td align="right" className="num font-bold">{formatINR(w.totalAmount)}</Td>

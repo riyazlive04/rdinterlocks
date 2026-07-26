@@ -6,6 +6,7 @@ import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate } from "@/lib/format";
 import { PaymentForm } from "./payment-form";
 import { DeleteOrder } from "./delete-order";
+import { DeleteCharge } from "./delete-charge";
 import { recordPayment } from "../actions";
 
 export default async function ClientDetailPage({
@@ -57,6 +58,30 @@ export default async function ClientDetailPage({
   // Paid = every payment recorded for the client (order payments + advances).
   const paid = client.payments.reduce((s, p) => s + p.amount, 0);
   const balance = ordered + addOns - refunded - paid;
+
+  // Transport + add-on charges auto-created from the loading screen for this
+  // customer (shifting, lintel slab, cement, etc.). Shown here so the extras
+  // billed on a loading trip are visible against the client and can be removed.
+  const loadingCharges = await prisma.loadingCharge.findMany({
+    where: { clientId: id },
+    include: { vendor: true },
+    orderBy: { date: "desc" },
+  });
+  const clientTipperRows = await prisma.loadingWork.findMany({
+    where: { clientId: id, tipperId: { not: null } },
+    select: { loadGroupId: true },
+  });
+  const loadGroupIds = Array.from(
+    new Set(clientTipperRows.map((r) => r.loadGroupId).filter((x): x is string => !!x))
+  );
+  const transportLoads = loadGroupIds.length
+    ? await prisma.tipperLoad.findMany({
+        where: { loadGroupId: { in: loadGroupIds }, rentAmount: { gt: 0 } },
+        include: { tipper: true },
+        orderBy: { date: "desc" },
+      })
+    : [];
+  const hasLoadingExtras = loadingCharges.length > 0 || transportLoads.length > 0;
 
   return (
     <>
@@ -327,6 +352,62 @@ export default async function ClientDetailPage({
               </div>
             )}
           </Card>
+
+          {hasLoadingExtras && (
+            <Card>
+              <h3 className="text-[14px] font-bold mb-3">Transport & loading charges</h3>
+              <div className="divide-y divide-slate-100">
+                {transportLoads.map((t) => (
+                  <div key={t.id} className="flex justify-between items-center py-2">
+                    <div>
+                      <div className="text-[12px] font-semibold">
+                        🛻 {t.tipper.name}
+                        <span className="text-slate-400 font-normal">
+                          {" "}
+                          · {t.rentDirection === "in" ? "income" : "expense"}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">{formatShortDate(t.date)}</div>
+                    </div>
+                    <div
+                      className={`num text-[13px] font-bold ${
+                        t.rentDirection === "in" ? "text-emerald-700" : "text-brand-red"
+                      }`}
+                    >
+                      {t.rentDirection === "in" ? "+" : "−"}
+                      {formatINR(t.rentAmount)}
+                    </div>
+                  </div>
+                ))}
+                {loadingCharges.map((c) => (
+                  <div key={c.id} className="flex justify-between items-center py-2 gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold truncate">
+                        {c.name}
+                        <span className="text-slate-400 font-normal">
+                          {" "}
+                          · {c.direction === "in" ? "sold" : "bought"}
+                          {c.vendor ? ` · ${c.vendor.name}` : ""}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">{formatShortDate(c.date)}</div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div
+                        className={`num text-[13px] font-bold ${
+                          c.direction === "in" ? "text-emerald-700" : "text-brand-red"
+                        }`}
+                      >
+                        {c.direction === "in" ? "+" : "−"}
+                        {formatINR(c.amount)}
+                      </div>
+                      <DeleteCharge id={c.id} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </>
