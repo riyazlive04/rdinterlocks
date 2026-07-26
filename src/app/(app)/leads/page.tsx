@@ -48,7 +48,11 @@ export default async function LeadsPage({
   const [leads, stageCounts, dueCount, openCount, convertedCount] = await Promise.all([
     prisma.lead.findMany({
       where,
-      orderBy: [{ followUpDate: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
+      // Newest lead first — a freshly-dispatched call lands at the top of the
+      // list. Follow-up prioritisation is still available via the "Due" filter
+      // and the "Follow-ups due" button, so nothing is lost by not sorting on it
+      // here.
+      orderBy: { createdAt: "desc" },
       include: { convertedClient: { select: { id: true, name: true } } },
     }),
     prisma.lead.groupBy({ by: ["quotationStage"], _count: true, where: { status: "open" } }),
