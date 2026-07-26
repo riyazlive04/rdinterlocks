@@ -172,7 +172,7 @@ export default async function DashboardPage() {
         .slice(0, 3)
         .map((ms) => ms.material.name)
         .join(", ")}${lowMaterials.length > 3 ? "…" : ""}${critical > 0 ? ` · ${critical} critical` : ""}`,
-      href: "/settings/materials",
+      href: "/settings/material-stock",
     });
   } else {
     for (const ms of lowMaterials) {
@@ -180,7 +180,7 @@ export default async function DashboardPage() {
         severity: ms.quantity <= ms.reorderAt / 2 ? "high" : "medium",
         title: `Low ${ms.material.name} stock`,
         sub: `${ms.quantity.toFixed(1)} ${ms.material.unit} left · reorder at ${ms.reorderAt}`,
-        href: "/settings/materials",
+        href: "/settings/material-stock",
       });
     }
   }
@@ -498,6 +498,54 @@ export default async function DashboardPage() {
               </div>
             ))}
           </div>
+        </Card>
+
+        {/* Raw material stock */}
+        <Card className="lg:col-span-3">
+          <div className="flex items-baseline justify-between mb-3">
+            <div>
+              <div className="text-base font-bold text-ink">Raw material stock</div>
+              <div className="text-xs text-slate-500">On hand · drawn down by production</div>
+            </div>
+            <Link
+              href="/settings/material-stock"
+              className="text-[11px] font-semibold text-brand-blue hover:underline"
+            >
+              Manage
+            </Link>
+          </div>
+          {materialStock.length === 0 ? (
+            <div className="text-xs text-slate-400 py-2">
+              No materials yet. <Link href="/settings/materials" className="text-brand-blue underline">Add materials</Link>.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {[...materialStock]
+                .sort((a, b) => a.material.name.localeCompare(b.material.name))
+                .map((ms) => {
+                  const low = ms.reorderAt > 0 && ms.quantity <= ms.reorderAt;
+                  return (
+                    <div
+                      key={ms.id}
+                      className={`rounded-xl p-3 text-center border ${
+                        low ? "bg-red-50 border-red-200" : "bg-slate-50 border-transparent"
+                      }`}
+                    >
+                      <div className={`num display text-lg font-bold ${low ? "text-red-600" : "text-ink"}`}>
+                        {ms.quantity.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+                        {ms.material.name}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {ms.material.unit}
+                        {low ? " · low" : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
         </Card>
       </div>
     </>

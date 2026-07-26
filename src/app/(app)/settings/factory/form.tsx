@@ -11,6 +11,7 @@ type Settings = {
   phone: string;
   gstin: string;
   cementBagsPer1000: number;
+  materialBasis: number;
   cashOpening: number;
   dryingDays: number;
   curingDays: number;
@@ -40,6 +41,7 @@ export function FactoryForm({
         await onSave({
           ...form,
           cementBagsPer1000: Number(form.cementBagsPer1000),
+          materialBasis: Math.max(1, Math.round(Number(form.materialBasis))),
           cashOpening: Number(form.cashOpening),
           dryingDays: Math.max(0, Math.round(Number(form.dryingDays))),
           curingDays: Math.max(0, Math.round(Number(form.curingDays))),
@@ -93,6 +95,17 @@ export function FactoryForm({
             onChange={(e) =>
               setForm({ ...form, cementBagsPer1000: Number(e.target.value) })
             }
+          />
+        </Field>
+        <Field
+          label="Raw material recipe basis (bricks)"
+          hint="Material usage is entered per this many bricks. Default 1000."
+        >
+          <Input
+            type="number"
+            step="100"
+            value={form.materialBasis}
+            onChange={(e) => setForm({ ...form, materialBasis: Number(e.target.value) })}
           />
         </Field>
         <Field label="Opening cash balance">

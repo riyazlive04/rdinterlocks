@@ -7,6 +7,16 @@ import { prisma } from "@/lib/db";
 import { startOfDay } from "@/lib/format";
 import { distributeInt } from "@/lib/distribute";
 
+// Recipe quantities are stored "per basis bricks" (admin-configurable, default
+// 1000). Consumption for a batch = (brickCount / basis) * qtyPerBasis.
+async function getMaterialBasis() {
+  const s = await prisma.settings.findUnique({
+    where: { id: "default" },
+    select: { materialBasis: true },
+  });
+  return s?.materialBasis || 1000;
+}
+
 const schema = z.object({
   date: z.string(),
   shift: z.enum(["day", "night"]).default("day"),
@@ -68,11 +78,12 @@ export async function createProduction(input: z.infer<typeof schema>) {
   });
 
   // Auto-decrement raw material stock based on recipe
+  const basis = await getMaterialBasis();
   const recipes = await prisma.materialRecipe.findMany({
     where: { brickSizeId: p.brickSizeId },
   });
   for (const r of recipes) {
-    const consumed = (p.brickCount / 1000) * r.qtyPer1000;
+    const consumed = (p.brickCount / basis) * r.qtyPer1000;
     await prisma.materialStock.upsert({
       where: { materialId: r.materialId },
       update: { quantity: { decrement: consumed } },
@@ -100,11 +111,12 @@ export async function updateProduction(id: string, input: z.infer<typeof schema>
 
   // Reverse the old material consumption, then apply the new one, so raw
   // material stock stays consistent after an edit.
+  const basis = await getMaterialBasis();
   const oldRecipes = await prisma.materialRecipe.findMany({
     where: { brickSizeId: existing.brickSizeId },
   });
   for (const r of oldRecipes) {
-    const consumed = (existing.brickCount / 1000) * r.qtyPer1000;
+    const consumed = (existing.brickCount / basis) * r.qtyPer1000;
     await prisma.materialStock.upsert({
       where: { materialId: r.materialId },
       update: { quantity: { increment: consumed } },
@@ -115,7 +127,7 @@ export async function updateProduction(id: string, input: z.infer<typeof schema>
     where: { brickSizeId: p.brickSizeId },
   });
   for (const r of newRecipes) {
-    const consumed = (p.brickCount / 1000) * r.qtyPer1000;
+    const consumed = (p.brickCount / basis) * r.qtyPer1000;
     await prisma.materialStock.upsert({
       where: { materialId: r.materialId },
       update: { quantity: { decrement: consumed } },
@@ -204,6 +216,7 @@ export async function createDailyProduction(input: z.infer<typeof dailySchema>) 
     where: { code: { startsWith: "B-" } },
   });
   let n = last ? parseInt(last.code.replace("B-", ""), 10) || 0 : 0;
+  const basis = await getMaterialBasis();
 
   for (const row of p.rows) {
     n += 1;
@@ -246,7 +259,7 @@ export async function createDailyProduction(input: z.infer<typeof dailySchema>) 
       where: { brickSizeId: row.brickSizeId },
     });
     for (const r of recipes) {
-      const consumed = (row.brickCount / 1000) * r.qtyPer1000;
+      const consumed = (row.brickCount / basis) * r.qtyPer1000;
       await prisma.materialStock.upsert({
         where: { materialId: r.materialId },
         update: { quantity: { decrement: consumed } },

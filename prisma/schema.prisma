@@ -30,6 +30,7 @@ model Settings {
   phone           String  @default("")
   gstin           String  @default("")
   cementBagsPer1000 Float @default(18) // recipe ratio, for material reconciliation
+  materialBasis   Int     @default(1000) // recipe quantities are "per this many bricks"
   cashOpening     Float   @default(0)
   weekStartDay    Int     @default(1) // 0 sun, 1 mon
   settlementDay   Int     @default(6) // 6 sat

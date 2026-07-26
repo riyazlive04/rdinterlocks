@@ -45,7 +45,8 @@ const sections: Array<{
     group: "Catalogue",
     items: [
       { href: "/settings/expense-categories", label: "Expense categories", sub: "Cement, Diesel, EB, Mould, etc.", icon: "Tag" },
-      { href: "/settings/materials", label: "Raw materials", sub: "Cement, Flyash, Powder…", icon: "Box" },
+      { href: "/settings/materials", label: "Raw materials", sub: "Materials + usage per batch", icon: "Box" },
+      { href: "/settings/material-stock", label: "Raw material stock", sub: "On-hand qty, reorder, add received", icon: "Stack" },
     ],
   },
 ];
