@@ -1,12 +1,15 @@
 "use client";
 import { useState, useTransition } from "react";
+import clsx from "clsx";
 import { Button, Card, Field, Input, Select } from "@/components/ui";
 import { formatINR, formatISODate } from "@/lib/format";
 
 type WorkerType = "loader" | "operator" | "employee";
+type LoadType = "brick" | "lintel";
 
 type Sub = {
   date: string;
+  loadType: LoadType;
   workerType: WorkerType;
   workerId: string;
   brickSizeId?: string;
@@ -37,6 +40,7 @@ export function LoadingForm({
         ? `${all[0].type}:${all[0].id}`
         : "";
   const [date, setDate] = useState(initial?.date ?? formatISODate(new Date()));
+  const [loadType, setLoadType] = useState<LoadType>(initial?.loadType ?? "brick");
   const [worker, setWorker] = useState(initialWorker);
   const [brickSizeId, setBrickSizeId] = useState(initial?.brickSizeId ?? sizes[0]?.id ?? "");
   const [brickCount, setBrickCount] = useState<number>(initial?.brickCount ?? 1000);
@@ -44,21 +48,24 @@ export function LoadingForm({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const isLintel = loadType === "lintel";
+  const unitOne = isLintel ? "slab" : "brick";
   const total = brickCount * ratePerBrick;
 
   const submit = () => {
     setError(null);
     if (!worker) return setError("Pick who did the loading");
-    if (brickCount <= 0) return setError("Brick count must be more than 0");
+    if (brickCount <= 0) return setError(`${isLintel ? "Slab" : "Brick"} count must be more than 0`);
     if (ratePerBrick <= 0) return setError("Rate must be more than 0");
     const [workerType, workerId] = worker.split(":") as [WorkerType, string];
     startTransition(async () => {
       try {
         await onSubmit({
           date,
+          loadType,
           workerType,
           workerId,
-          brickSizeId: brickSizeId || undefined,
+          brickSizeId: isLintel ? undefined : brickSizeId || undefined,
           brickCount,
           ratePerBrick,
         });
@@ -106,24 +113,50 @@ export function LoadingForm({
             )}
           </Select>
         </Field>
-        <Field label="Brick size (optional)">
-          <Select value={brickSizeId} onChange={(e) => setBrickSizeId(e.target.value)}>
-            <option value="">- mixed -</option>
-            {sizes.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
+        <Field label="What was handled">
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setLoadType("brick")}
+              className={clsx(
+                "flex-1 px-3 py-2 rounded-lg text-[12px] font-semibold transition",
+                !isLintel ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
+              )}
+            >
+              Bricks
+            </button>
+            <button
+              type="button"
+              onClick={() => setLoadType("lintel")}
+              className={clsx(
+                "flex-1 px-3 py-2 rounded-lg text-[12px] font-semibold transition",
+                isLintel ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
+              )}
+            >
+              Lintel slabs
+            </button>
+          </div>
         </Field>
-        <Field label="Bricks loaded">
+        {!isLintel && (
+          <Field label="Brick size (optional)">
+            <Select value={brickSizeId} onChange={(e) => setBrickSizeId(e.target.value)}>
+              <option value="">- mixed -</option>
+              {sizes.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        <Field label={`${isLintel ? "Slabs" : "Bricks"} loaded`}>
           <Input
             type="number"
             value={brickCount}
             onChange={(e) => setBrickCount(Number(e.target.value || 0))}
           />
         </Field>
-        <Field label="Rate (₹/brick)">
+        <Field label={`Rate (₹/${unitOne})`}>
           <Input
             type="number"
             step="0.1"

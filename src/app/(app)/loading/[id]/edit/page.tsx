@@ -46,6 +46,7 @@ export default async function EditLoadingPage({
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
         initial={{
           date: formatISODate(work.date),
+          loadType: (work.loadType as "brick" | "lintel") ?? "brick",
           workerType,
           workerId,
           brickSizeId: work.brickSizeId ?? undefined,
