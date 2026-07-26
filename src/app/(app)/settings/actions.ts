@@ -191,6 +191,28 @@ export async function deleteMason(id: string) {
   revalidatePath("/settings/masons");
 }
 
+// ─── Machines ─────────────────────────────────────────────────────────
+
+const machineSchema = z.object({ name: z.string().min(1), order: z.number().optional() });
+
+export async function createMachine(data: { name: string; order?: number }) {
+  const p = machineSchema.parse(data);
+  await prisma.machine.create({ data: { name: p.name.trim(), order: Number(p.order ?? 0) } });
+  revalidatePath("/settings/machines");
+}
+export async function updateMachine(id: string, data: { name: string; order?: number }) {
+  const p = machineSchema.parse(data);
+  await prisma.machine.update({
+    where: { id },
+    data: { name: p.name.trim(), order: Number(p.order ?? 0) },
+  });
+  revalidatePath("/settings/machines");
+}
+export async function deleteMachine(id: string) {
+  await prisma.machine.update({ where: { id }, data: { active: false } });
+  revalidatePath("/settings/machines");
+}
+
 export async function createLoader(data: { name: string; phone?: string }) {
   const p = personSchema.parse(data);
   await prisma.loader.create({ data: { name: p.name.trim(), phone: p.phone?.trim() || null } });

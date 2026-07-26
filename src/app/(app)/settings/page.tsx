@@ -11,6 +11,7 @@ const sections: Array<{
     group: "Factory",
     items: [
       { href: "/settings/factory", label: "Factory profile", sub: "Name, address, phone, GST", icon: "Building" },
+      { href: "/settings/machines", label: "Machines", sub: "Production lines - rename or add", icon: "Tools" },
       { href: "/settings/users", label: "Users & access", sub: "Add logins, choose what each can see", icon: "Workers" },
       { href: "/settings/security", label: "Security", sub: "Change password", icon: "Settings" },
     ],
