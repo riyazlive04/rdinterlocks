@@ -5,7 +5,8 @@ import { Button, Card, Field, Input, Select, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
 type Area = { key: string; label: string };
-type Role = "admin" | "manager" | "staff";
+type Role = "admin" | "manager" | "telecaller" | "staff";
+const ROLES: Role[] = ["admin", "manager", "telecaller", "staff"];
 type User = {
   id: string;
   name: string;
@@ -59,7 +60,7 @@ export function UsersManager({
     setEditing(u.id);
     setName(u.name);
     setPassword("");
-    setRole((["admin", "manager", "staff"].includes(u.role) ? u.role : "manager") as Role);
+    setRole((ROLES.includes(u.role as Role) ? u.role : "manager") as Role);
     setPerms(new Set(u.permissions));
     setActive(u.active);
     setError(null);
@@ -136,6 +137,7 @@ export function UsersManager({
           <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="admin">Admin (full access)</option>
             <option value="manager">Manager</option>
+            <option value="telecaller">Telecaller</option>
             <option value="staff">Staff</option>
           </Select>
         </Field>

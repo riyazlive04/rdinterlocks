@@ -426,7 +426,7 @@ export async function changePassword(data: z.infer<typeof passwordSchema>) {
 
 // ─── Users & access (admin-managed) ───────────────────────────────────
 
-const roleEnum = z.enum(["admin", "manager", "staff"]);
+const roleEnum = z.enum(["admin", "manager", "telecaller", "staff"]);
 
 const userCreateSchema = z.object({
   name: z.string().min(1),

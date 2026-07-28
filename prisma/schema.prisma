@@ -14,10 +14,32 @@ model User {
   id          String   @id @default(cuid())
   name        String
   pinHash     String
-  role        String   @default("admin") // admin (full) | manager | staff
+  role        String   @default("admin") // admin (full) | manager | telecaller | staff
   active      Boolean  @default(true)
   permissions String[] @default([]) // area keys granted (ignored for admin)
   createdAt   DateTime @default(now())
+
+  assignedTasks Task[] @relation("TaskAssignee")
+  createdTasks  Task[] @relation("TaskCreator")
+}
+
+// A to-do the admin assigns to another user (manager / telecaller / staff).
+// The assignee sees it on their Tasks page and marks it done.
+model Task {
+  id           String    @id @default(cuid())
+  title        String
+  details      String?
+  assignedToId String
+  assignedTo   User      @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+  createdById  String?
+  createdBy    User?     @relation("TaskCreator", fields: [createdById], references: [id])
+  dueDate      DateTime?
+  status       String    @default("open") // open | done
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@index([assignedToId])
+  @@index([status])
 }
 
 // ─── Master data (admin-managed) ──────────────────────────────────────
