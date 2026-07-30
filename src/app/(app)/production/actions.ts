@@ -274,6 +274,24 @@ export async function createDailyProduction(input: z.infer<typeof dailySchema>) 
 }
 
 export async function deleteProduction(id: string) {
+  const existing = await prisma.productionEntry.findUnique({ where: { id } });
+  if (!existing) return;
+
+  // Restore the raw material this entry consumed, mirroring the reversal in
+  // updateProduction, so deleting an entry gives its stock back symmetrically.
+  const basis = await getMaterialBasis();
+  const recipes = await prisma.materialRecipe.findMany({
+    where: { brickSizeId: existing.brickSizeId },
+  });
+  for (const r of recipes) {
+    const consumed = (existing.brickCount / basis) * r.qtyPer1000;
+    await prisma.materialStock.upsert({
+      where: { materialId: r.materialId },
+      update: { quantity: { increment: consumed } },
+      create: { materialId: r.materialId, quantity: consumed, reorderAt: 0 },
+    });
+  }
+
   await prisma.$transaction([
     prisma.stockBatch.deleteMany({ where: { productionEntryId: id } }),
     prisma.productionShare.deleteMany({ where: { productionEntryId: id } }),
