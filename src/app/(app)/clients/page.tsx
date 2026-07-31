@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR } from "@/lib/format";
+import { ORDER_STATUSES } from "@/lib/order-status";
 import { Pagination } from "@/components/pagination";
 
 const PAGE_SIZE = 50;
@@ -10,12 +11,13 @@ const PAGE_SIZE = 50;
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; page?: string; status?: string }>;
 }) {
   const sp = await searchParams;
   const q = sp?.q?.trim() ?? "";
+  const status = ORDER_STATUSES.some((s) => s.key === sp?.status) ? sp!.status! : "";
 
-  const clients = await prisma.client.findMany({
+  const all = await prisma.client.findMany({
     where: {
       active: true,
       ...(q
@@ -36,9 +38,27 @@ export default async function ClientsPage({
     orderBy: { name: "asc" },
   });
 
+  // Status chips filter the customer list down to whoever has an order sitting
+  // in that state right now — the same three states as the register.
+  const counts = {
+    upcoming: all.filter((c) => c.orders.some((o) => o.status === "upcoming")).length,
+    active: all.filter((c) => c.orders.some((o) => o.status === "active")).length,
+    completed: all.filter((c) => c.orders.some((o) => o.status === "completed")).length,
+  };
+  const clients = status
+    ? all.filter((c) => c.orders.some((o) => o.status === status))
+    : all;
+
   const page = Math.max(1, Number(sp?.page) || 1);
   const totalPages = Math.max(1, Math.ceil(clients.length / PAGE_SIZE));
   const pageClients = clients.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const statusHref = (s?: string) => {
+    const u = new URLSearchParams();
+    if (q) u.set("q", q);
+    if (s) u.set("status", s);
+    return `/clients${u.toString() ? `?${u.toString()}` : ""}`;
+  };
 
   return (
     <>
@@ -46,16 +66,50 @@ export default async function ClientsPage({
         title="Clients & Sales"
         sub="Customers + their orders, deliveries, payments"
         right={
-          <Link
-            href="/clients/new"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-red text-white text-[13px] font-semibold shadow-red"
-          >
-            <Icon.Plus size={16} stroke={2.4} /> Add client
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/clients/register"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-ink text-white text-[13px] font-semibold"
+            >
+              <Icon.Receipt size={16} stroke={2.2} /> Register
+            </Link>
+            <Link
+              href="/clients/new"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-red text-white text-[13px] font-semibold shadow-red"
+            >
+              <Icon.Plus size={16} stroke={2.4} /> Add client
+            </Link>
+          </div>
         }
       />
 
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        <Link
+          href={statusHref(undefined)}
+          className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${
+            !status ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
+          }`}
+        >
+          All
+        </Link>
+        {ORDER_STATUSES.map((s) => (
+          <Link
+            key={s.key}
+            href={statusHref(s.key)}
+            className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${
+              status === s.key
+                ? "bg-ink text-white"
+                : "bg-white text-slate-700 border border-slate-200"
+            }`}
+          >
+            {s.label}
+            <span className="opacity-60 ml-1.5 num">{counts[s.key as keyof typeof counts]}</span>
+          </Link>
+        ))}
+      </div>
+
       <form className="mb-4" method="get">
+        {status && <input type="hidden" name="status" value={status} />}
         <div className="relative">
           <Icon.Search
             size={16}
@@ -100,7 +154,7 @@ export default async function ClientsPage({
             );
             const due = Math.max(0, ordered - paid);
             const openOrders = c.orders.filter(
-              (o) => o.status !== "complete" && o.status !== "cancelled"
+              (o) => o.status !== "completed" && o.status !== "cancelled"
             ).length;
             return (
               <Link

@@ -52,6 +52,11 @@ async function main() {
     prisma.masonWork.deleteMany({}),
     prisma.loadingWork.deleteMany({}),
     prisma.tipperLoad.deleteMany({}),
+    prisma.vendorPayment.deleteMany({}),
+
+    // Dies are operational too — a new season starts the count over.
+    prisma.dieUsage.deleteMany({}),
+    prisma.die.deleteMany({}),
 
     prisma.expense.deleteMany({}),
     prisma.employeePayout.deleteMany({}),

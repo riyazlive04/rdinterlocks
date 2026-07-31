@@ -36,6 +36,14 @@ export const primaryNav: NavItem[] = [
     matches: ["/leads"],
   },
   {
+    id: "register",
+    label: "Sales register",
+    href: "/clients/register",
+    icon: "Receipt",
+    matches: ["/clients/register"],
+    area: "sales",
+  },
+  {
     id: "sales",
     label: "Clients & Sales",
     href: "/clients",
@@ -56,6 +64,14 @@ export const primaryNav: NavItem[] = [
     icon: "Truck",
     matches: ["/tipper"],
   },
+  {
+    id: "avm",
+    label: "AVM advance & rent",
+    href: "/avm",
+    icon: "Cash",
+    matches: ["/avm"],
+    area: "tipper",
+  },
   { id: "mason", label: "Mason", href: "/mason", icon: "Hammer", matches: ["/mason"] },
   {
     id: "loading",
@@ -70,6 +86,13 @@ export const primaryNav: NavItem[] = [
     href: "/expense",
     icon: "Tag",
     matches: ["/expense"],
+  },
+  {
+    id: "die",
+    label: "Dies (moulds)",
+    href: "/die",
+    icon: "Tools",
+    matches: ["/die"],
   },
   {
     id: "employees",

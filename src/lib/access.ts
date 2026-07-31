@@ -12,6 +12,7 @@ export const ACCESS_AREAS = [
   { key: "mason", label: "Mason work" },
   { key: "loading", label: "Loading work" },
   { key: "expense", label: "Expense" },
+  { key: "die", label: "Dies (moulds)" },
   { key: "employees", label: "Employees" },
   { key: "leave", label: "Leave marking" },
   { key: "payroll", label: "Payroll" },

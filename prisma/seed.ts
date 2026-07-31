@@ -16,6 +16,10 @@ async function main() {
   // wipe (children first)
   await prisma.materialStock.deleteMany().catch(() => {});
   await prisma.materialRecipe.deleteMany().catch(() => {});
+  await prisma.dieUsage.deleteMany().catch(() => {});
+  await prisma.die.deleteMany().catch(() => {});
+  await prisma.vendorPayment.deleteMany().catch(() => {});
+  await prisma.task.deleteMany().catch(() => {});
   await prisma.cashEntry.deleteMany();
   await prisma.advance.deleteMany();
   await prisma.employeeAttendance.deleteMany();
@@ -141,6 +145,11 @@ async function main() {
     ["Bonus", 25],
     ["EMI", 26],
     ["Shifting charges", 27],
+    ["Lintel Beam", 28],
+    ["Ranjith Taken", 29],
+    ["Interest", 30],
+    ["Debt", 31],
+    ["Tipper Due", 32],
     ["Other", 99],
   ] as [string, number][]) {
     await prisma.expenseCategory.create({ data: { name, order } });
@@ -366,7 +375,7 @@ async function main() {
       clientId: sureshBuilders.id,
       date: daysAgo(2),
       expectedDeliveryDate: new Date(),
-      status: "partial",
+      status: "active",
       items: {
         create: [
           {

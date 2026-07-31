@@ -5,9 +5,13 @@ export type ReportKind =
   | "sales"
   | "expense"
   | "tipper"
+  | "tipperpl"
+  | "avm"
+  | "die"
   | "mason"
   | "loading"
   | "wages"
+  | "salarysummary"
   | "cashbook";
 
 export type ReportFilter = {
@@ -20,6 +24,8 @@ export type ReportFilter = {
   vendorId?: string;
   tipperId?: string;
   personId?: string;
+  // Salary summary only: roll the range up by week or by month.
+  period?: "week" | "month";
 };
 
 export type LedgerCol = {
@@ -54,6 +60,9 @@ export type LedgerData = {
   // Money-typed columns we should sum for totals row
   moneyKeys?: string[];
   numberKeys?: string[];
+  // What the per-section subtotal row is called. Date-grouped reports say
+  // "Day total"; the summary reports group by week / month / vendor instead.
+  subtotalLabel?: string;
 };
 
 const monthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -423,6 +432,283 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         totals,
       };
     }
+
+    case "tipperpl": {
+      // Profit & loss per truck. Income is the rent our own tippers earned;
+      // cost is what vendors charged for their trips plus the running expenses
+      // tagged to a tipper (diesel, oil, spares, EMI).
+      //
+      // The transport expense auto-written by a loading entry is deliberately
+      // left out: for an own tipper it is the internal counterpart of the
+      // income above, and for a rented one the same rupee is already counted as
+      // the vendor's rent. Those rows carry a loadGroupId, which is how they
+      // are told apart from a real running cost.
+      const [tippers, loads, expenses] = await Promise.all([
+        prisma.tipper.findMany({
+          where: filter.tipperId ? { id: filter.tipperId } : {},
+          include: { vendor: true },
+          orderBy: { name: "asc" },
+        }),
+        prisma.tipperLoad.findMany({
+          where: {
+            date: dateRange,
+            ...(filter.tipperId ? { tipperId: filter.tipperId } : {}),
+          },
+        }),
+        prisma.expense.findMany({
+          where: {
+            date: dateRange,
+            tipperId: { not: null },
+            loadGroupId: null,
+            ...(filter.tipperId ? { tipperId: filter.tipperId } : {}),
+          },
+          include: { category: true },
+        }),
+      ]);
+
+      const rows: LedgerRow[] = [];
+      const totals: Record<string, number> = { income: 0, rent: 0, running: 0, profit: 0 };
+
+      for (const t of tippers) {
+        const mine = loads.filter((l) => l.tipperId === t.id);
+        const income = mine
+          .filter((l) => l.rentDirection === "in")
+          .reduce((s, l) => s + l.rentAmount, 0);
+        const rent = mine
+          .filter((l) => l.rentDirection === "out")
+          .reduce((s, l) => s + l.rentAmount, 0);
+        const running = expenses
+          .filter((e) => e.tipperId === t.id)
+          .reduce((s, e) => s + e.amount, 0);
+        const profit = income - rent - running;
+        if (mine.length === 0 && running === 0) continue;
+        totals.income += income;
+        totals.rent += rent;
+        totals.running += running;
+        totals.profit += profit;
+
+        const row: LedgerRow = {
+          id: t.id,
+          emphasis: profit >= 0 ? "credit" : "debit",
+          cells: {
+            tipper: t.name,
+            owner: t.ownership === "own" ? "RD (own)" : t.vendor?.name ?? "Rented",
+            trips: mine.length,
+            income,
+            rent,
+            running,
+            profit,
+          },
+          children: [],
+        };
+        // Break the running costs down so a bad month is explainable.
+        const byCategory: Record<string, number> = {};
+        for (const e of expenses.filter((x) => x.tipperId === t.id)) {
+          byCategory[e.category.name] = (byCategory[e.category.name] ?? 0) + e.amount;
+        }
+        for (const [name, amount] of Object.entries(byCategory)) {
+          row.children!.push({
+            id: `${t.id}-${name}`,
+            emphasis: "debit",
+            cells: {
+              tipper: "",
+              owner: "",
+              trips: 0,
+              income: 0,
+              rent: 0,
+              running: 0, // already counted on the parent
+              profit: 0,
+              detail: `${name} ${Math.round(amount).toLocaleString("en-IN")}`,
+            },
+          });
+        }
+        rows.push(row);
+      }
+
+      return {
+        title: "Tipper profit & loss",
+        unit: "tippers",
+        moneyKeys: ["income", "rent", "running", "profit"],
+        numberKeys: ["trips"],
+        subtotalLabel: "Total",
+        columns: [
+          { key: "tipper", header: "Tipper", format: "text" },
+          { key: "owner", header: "Owner", format: "muted", width: "110px" },
+          { key: "trips", header: "Trips", format: "number", align: "right" },
+          { key: "income", header: "Rent earned", format: "money", align: "right" },
+          { key: "rent", header: "Rent paid", format: "money", align: "right" },
+          { key: "running", header: "Running cost", format: "money", align: "right" },
+          { key: "profit", header: "Profit", format: "money", align: "right" },
+          { key: "detail", header: "Cost breakdown", format: "muted" },
+        ],
+        sections: [
+          {
+            dateKey: "all",
+            dateLabel: "Per tipper",
+            rows,
+            subtotals: totals,
+          },
+        ],
+        totals,
+      };
+    }
+
+    case "avm": {
+      // What each rented-tipper vendor charged us, what we handed over, and
+      // what is still owed. Advance and rent-balance payments are shown apart
+      // because the office thinks of them separately.
+      const [vendors, loads, payments] = await Promise.all([
+        prisma.vendor.findMany({
+          where: { ...(filter.vendorId ? { id: filter.vendorId } : {}) },
+          orderBy: { name: "asc" },
+        }),
+        prisma.tipperLoad.findMany({
+          where: { date: dateRange, rentDirection: "out" },
+        }),
+        prisma.vendorPayment.findMany({ where: { date: dateRange } }),
+      ]);
+
+      const rows: LedgerRow[] = [];
+      const totals: Record<string, number> = {
+        trips: 0,
+        charged: 0,
+        advance: 0,
+        settled: 0,
+        balance: 0,
+      };
+
+      for (const v of vendors) {
+        const trips = loads.filter((l) => l.vendorId === v.id);
+        const charged = trips.reduce((s, l) => s + l.rentAmount, 0);
+        const advance = payments
+          .filter((p) => p.vendorId === v.id && p.kind === "advance")
+          .reduce((s, p) => s + p.amount, 0);
+        const settled = payments
+          .filter((p) => p.vendorId === v.id && p.kind === "rent")
+          .reduce((s, p) => s + p.amount, 0);
+        if (charged === 0 && advance === 0 && settled === 0) continue;
+        const balance = charged - advance - settled;
+        totals.trips += trips.length;
+        totals.charged += charged;
+        totals.advance += advance;
+        totals.settled += settled;
+        totals.balance += balance;
+        rows.push({
+          id: v.id,
+          emphasis: balance > 0 ? "debit" : "credit",
+          cells: {
+            vendor: v.name,
+            trips: trips.length,
+            charged,
+            advance,
+            settled,
+            balance,
+            note: balance > 0 ? "Still to pay" : balance < 0 ? "Paid ahead" : "Settled",
+          },
+        });
+      }
+
+      return {
+        title: "AVM - advance & rent",
+        unit: "vendors",
+        moneyKeys: ["charged", "advance", "settled", "balance"],
+        numberKeys: ["trips"],
+        subtotalLabel: "Total",
+        columns: [
+          { key: "vendor", header: "Vendor", format: "text" },
+          { key: "trips", header: "Trips", format: "number", align: "right" },
+          { key: "charged", header: "Rent charged", format: "money", align: "right" },
+          { key: "advance", header: "Advance paid", format: "money", align: "right" },
+          { key: "settled", header: "Balance paid", format: "money", align: "right" },
+          { key: "balance", header: "Still due", format: "money", align: "right" },
+          { key: "note", header: "Status", format: "muted", width: "110px" },
+        ],
+        sections: [{ dateKey: "all", dateLabel: "Per vendor", rows, subtotals: totals }],
+        totals,
+      };
+    }
+
+    case "die": {
+      // Every die face that was in service during the range, what it cost and
+      // how many bricks it pressed. The purchase price is split evenly over the
+      // two sides, so a die that never got flipped shows its true cost per brick
+      // only once side 2 has run too.
+      const [dies, entries] = await Promise.all([
+        prisma.die.findMany({
+          include: { brickSize: true, vendor: true, usages: { orderBy: { side: "asc" } } },
+          orderBy: { purchasedAt: "asc" },
+        }),
+        prisma.productionEntry.findMany({
+          select: { date: true, brickCount: true, brickSizeId: true },
+        }),
+      ]);
+
+      const rows: LedgerRow[] = [];
+      const totals: Record<string, number> = { cost: 0, bricks: 0 };
+
+      for (const d of dies) {
+        for (const u of d.usages) {
+          const start = u.startedAt;
+          const end = u.endedAt ?? filter.to;
+          // Only show a side that was actually in service inside the range.
+          if (start > filter.to || end < filter.from) continue;
+          const bricks = entries
+            .filter(
+              (e) =>
+                e.date >= start &&
+                e.date <= end &&
+                e.date >= filter.from &&
+                e.date <= filter.to &&
+                (!d.brickSizeId || e.brickSizeId === d.brickSizeId)
+            )
+            .reduce((s, e) => s + e.brickCount, 0);
+          const sideCost = d.cost / 2;
+          totals.cost += sideCost;
+          totals.bricks += bricks;
+          rows.push({
+            id: u.id,
+            cells: {
+              die: d.code,
+              side: `Side ${u.side}`,
+              size: d.brickSize?.label ?? "any",
+              vendor: d.vendor?.name ?? "-",
+              from: `${start.getDate()} ${monthShort[start.getMonth()]}`,
+              to: u.endedAt
+                ? `${u.endedAt.getDate()} ${monthShort[u.endedAt.getMonth()]}`
+                : "running",
+              bricks,
+              cost: Math.round(sideCost),
+              per1000: bricks > 0 ? Math.round((sideCost / bricks) * 1000) : 0,
+            },
+          });
+        }
+      }
+
+      return {
+        title: "Dies used & cost",
+        unit: "die sides",
+        moneyKeys: ["cost", "per1000"],
+        numberKeys: ["bricks"],
+        subtotalLabel: "Total",
+        columns: [
+          { key: "die", header: "Die", format: "text", width: "80px" },
+          { key: "side", header: "Side", format: "text", width: "70px" },
+          { key: "size", header: "Size", format: "muted", width: "70px" },
+          { key: "vendor", header: "Bought from", format: "muted" },
+          { key: "from", header: "In", format: "mono", width: "70px" },
+          { key: "to", header: "Out", format: "mono", width: "70px" },
+          { key: "bricks", header: "Bricks", format: "number", align: "right" },
+          { key: "cost", header: "Cost share", format: "money", align: "right" },
+          { key: "per1000", header: "₹ / 1000", format: "money", align: "right" },
+        ],
+        sections: [{ dateKey: "all", dateLabel: "Die by die", rows, subtotals: totals }],
+        // per1000 is a rate — summing it would be meaningless.
+        totals: { cost: totals.cost, bricks: totals.bricks },
+      };
+    }
+
+    case "salarysummary":
+      return salarySummary(filter);
 
     case "mason": {
       const settings = await prisma.settings.findUnique({ where: { id: "default" } });
@@ -808,6 +1094,245 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
       };
     }
   }
+}
+
+// ─── Labour salary: weekly / monthly roll-up ──────────────────────────
+
+// Monday of the week a date falls in.
+function startOfWeek(d: Date) {
+  const w = new Date(d);
+  w.setHours(0, 0, 0, 0);
+  w.setDate(w.getDate() - ((w.getDay() - 1 + 7) % 7));
+  return w;
+}
+
+function startOfMonthOf(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function dayCount(from: Date, to: Date) {
+  return Math.max(0, Math.round((to.getTime() - from.getTime()) / 86400000) + 1);
+}
+
+/**
+ * One row per worker per week (or per month): everything they earned, what
+ * they took as advance, what has been paid out, and what is still owed.
+ *
+ * This is the sheet the office settles wages from — the per-entry Salary report
+ * is the detail behind it.
+ */
+async function salarySummary(filter: ReportFilter): Promise<LedgerData> {
+  const period = filter.period ?? "month";
+  const dateRange = { gte: filter.from, lte: filter.to };
+  const bucketOf = (d: Date) => (period === "week" ? startOfWeek(d) : startOfMonthOf(d));
+
+  const [shares, loadingWorks, masonWorks, advances, employeePayouts, workerPayouts, leaves, employees] =
+    await Promise.all([
+      prisma.productionShare.findMany({
+        where: { productionEntry: { date: dateRange } },
+        include: { operator: true, productionEntry: true },
+      }),
+      prisma.loadingWork.findMany({
+        where: { date: dateRange },
+        include: { loader: true, operator: true, employee: true },
+      }),
+      prisma.masonWork.findMany({ where: { date: dateRange }, include: { mason: true } }),
+      prisma.advance.findMany({
+        where: { date: dateRange },
+        include: { operator: true, mason: true, loader: true, employee: true },
+      }),
+      prisma.employeePayout.findMany({ where: { date: dateRange }, include: { employee: true } }),
+      prisma.workerPayout.findMany({
+        where: { date: dateRange },
+        include: { operator: true, mason: true, loader: true, employee: true },
+      }),
+      prisma.leave.findMany({ where: { date: dateRange } }),
+      prisma.employee.findMany({ where: { active: true } }),
+    ]);
+
+  type Cell = {
+    bucket: Date;
+    pid: string;
+    person: string;
+    role: string;
+    earned: number;
+    advance: number;
+    paid: number;
+    leave: number;
+  };
+  const cells = new Map<string, Cell>();
+  const keyOf = (bucket: Date, pid: string) => `${isoDate(bucket)}|${pid}`;
+
+  const add = (
+    date: Date,
+    pid: string | null,
+    person: string,
+    role: string,
+    field: "earned" | "advance" | "paid" | "leave",
+    amount: number
+  ) => {
+    if (!pid || amount === 0) return;
+    if (filter.personId && pid !== filter.personId) return;
+    const bucket = bucketOf(date);
+    const k = keyOf(bucket, pid);
+    if (!cells.has(k)) {
+      cells.set(k, { bucket, pid, person, role, earned: 0, advance: 0, paid: 0, leave: 0 });
+    }
+    cells.get(k)![field] += amount;
+  };
+
+  for (const s of shares) {
+    add(s.productionEntry.date, s.operatorId, s.operator.name, "operator", "earned", s.amount);
+  }
+  for (const w of loadingWorks) {
+    add(
+      w.date,
+      w.loaderId ?? w.operatorId ?? w.employeeId,
+      w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-",
+      w.workerType,
+      "earned",
+      w.totalAmount
+    );
+  }
+  for (const w of masonWorks) {
+    add(w.date, w.masonId, w.mason.name, "mason", "earned", w.totalAmount);
+  }
+  for (const a of advances) {
+    add(
+      a.date,
+      a.operatorId ?? a.masonId ?? a.loaderId ?? a.employeeId,
+      a.operator?.name ?? a.mason?.name ?? a.loader?.name ?? a.employee?.name ?? "-",
+      a.personType,
+      "advance",
+      a.amount
+    );
+  }
+  for (const p of employeePayouts) {
+    add(p.date, p.employeeId, p.employee.name, "employee", "paid", p.netPaid);
+  }
+  for (const p of workerPayouts) {
+    add(
+      p.date,
+      p.operatorId ?? p.masonId ?? p.loaderId ?? p.employeeId,
+      p.operator?.name ?? p.mason?.name ?? p.loader?.name ?? p.employee?.name ?? "-",
+      p.personType,
+      "paid",
+      p.netPaid
+    );
+  }
+
+  // Salaried staff don't earn per piece, so accrue their pay across the period.
+  // Monthly pay is spread at rate/30 a day; daily pay counts working days only,
+  // which is what marking a leave is for.
+  const bucketsInRange: Array<{ start: Date; end: Date }> = [];
+  {
+    let cursor = bucketOf(filter.from);
+    while (cursor <= filter.to) {
+      const next =
+        period === "week"
+          ? new Date(cursor.getTime() + 7 * 86400000)
+          : new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      const start = cursor < filter.from ? filter.from : cursor;
+      const endCandidate = new Date(next.getTime() - 1);
+      const end = endCandidate > filter.to ? filter.to : endCandidate;
+      bucketsInRange.push({ start, end });
+      cursor = next;
+    }
+  }
+
+  for (const e of employees) {
+    if (e.payRate <= 0) continue;
+    for (const b of bucketsInRange) {
+      const days = dayCount(b.start, b.end);
+      const lv = leaves.filter(
+        (l) => l.employeeId === e.id && l.date >= b.start && l.date <= b.end
+      ).length;
+      let earned = 0;
+      if (e.payType === "monthly") earned = (e.payRate / 30) * days;
+      else if (e.payType === "daily") earned = e.payRate * Math.max(0, days - lv);
+      if (earned > 0) add(b.start, e.id, e.name, e.role, "earned", Math.round(earned));
+      if (lv > 0) add(b.start, e.id, e.name, e.role, "leave", lv);
+    }
+  }
+
+  // Leaves for non-employee workers, so the sheet shows who was off.
+  for (const l of leaves) {
+    if (l.employeeId) continue;
+    const pid = l.operatorId ?? l.masonId ?? l.loaderId;
+    if (!pid) continue;
+    const bucket = bucketOf(l.date);
+    const cell = cells.get(keyOf(bucket, pid));
+    if (cell) cell.leave += 1;
+  }
+
+  // Newest period first, and inside it the biggest earner first.
+  const byBucket = new Map<string, Cell[]>();
+  for (const c of cells.values()) {
+    const k = isoDate(c.bucket);
+    if (!byBucket.has(k)) byBucket.set(k, []);
+    byBucket.get(k)!.push(c);
+  }
+
+  const label = (bucket: Date) => {
+    if (period === "month") {
+      return `${monthShort[bucket.getMonth()]} ${bucket.getFullYear()}`;
+    }
+    const end = new Date(bucket.getTime() + 6 * 86400000);
+    return `Week ${bucket.getDate()} ${monthShort[bucket.getMonth()]} - ${end.getDate()} ${
+      monthShort[end.getMonth()]
+    } ${end.getFullYear()}`;
+  };
+
+  const sections = Array.from(byBucket.entries())
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([key, list]) => {
+      const rows: LedgerRow[] = list
+        .sort((a, b) => b.earned - a.earned || a.person.localeCompare(b.person))
+        .map((c) => ({
+          id: `${key}-${c.pid}`,
+          cells: {
+            person: c.person,
+            role: c.role,
+            leave: c.leave || null,
+            earned: c.earned || null,
+            advance: c.advance || null,
+            paid: c.paid || null,
+            balance: Math.round(c.earned - c.advance - c.paid),
+          },
+        }));
+      const subtotals: Record<string, number> = {};
+      for (const r of rows) {
+        for (const k of ["earned", "advance", "paid", "balance", "leave"]) {
+          const v = r.cells[k];
+          if (typeof v === "number") subtotals[k] = (subtotals[k] ?? 0) + v;
+        }
+      }
+      return { dateKey: key, dateLabel: label(list[0].bucket), rows, subtotals };
+    });
+
+  const totals: Record<string, number> = {};
+  for (const s of sections) {
+    for (const [k, v] of Object.entries(s.subtotals)) totals[k] = (totals[k] ?? 0) + v;
+  }
+
+  return {
+    title: period === "week" ? "Labour salary - weekly" : "Labour salary - monthly",
+    unit: "workers",
+    moneyKeys: ["earned", "advance", "paid", "balance"],
+    numberKeys: ["leave"],
+    subtotalLabel: period === "week" ? "Week total" : "Month total",
+    columns: [
+      { key: "person", header: "Person", format: "text" },
+      { key: "role", header: "Role", format: "muted", width: "90px" },
+      { key: "leave", header: "Leave", format: "number", align: "right", width: "70px" },
+      { key: "earned", header: "Earned", format: "money", align: "right" },
+      { key: "advance", header: "Advance", format: "money", align: "right" },
+      { key: "paid", header: "Paid", format: "money", align: "right" },
+      { key: "balance", header: "Still due", format: "money", align: "right" },
+    ],
+    sections,
+    totals,
+  };
 }
 
 // ─── Summary tab data ─────────────────────────────────────────────────

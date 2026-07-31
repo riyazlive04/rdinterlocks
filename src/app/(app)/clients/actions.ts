@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { deriveOrderStatus } from "@/lib/order-status";
 
 // ─── Clients ──────────────────────────────────────────────────────────
 
@@ -598,9 +599,29 @@ async function recomputeOrderStatus(orderId: string) {
     deliveredQty += d.items.reduce((s, i) => s + i.quantity, 0);
     deliveredQty -= d.returns.reduce((s, r) => s + r.brickCount, 0);
   }
-  const status =
-    deliveredQty >= orderedQty ? "complete" : deliveredQty > 0 ? "partial" : "open";
+  const status = deriveOrderStatus({
+    orderedQty,
+    deliveredQty,
+    date: order.date,
+    expectedDeliveryDate: order.expectedDeliveryDate,
+    current: order.status,
+  });
   await prisma.order.update({ where: { id: orderId }, data: { status } });
+}
+
+// Set an order's status by hand — the register's Upcoming / Active / Completed
+// chips. Deliveries still win: recording one recomputes the status.
+export async function setOrderStatus(orderId: string, status: string) {
+  const allowed = ["upcoming", "active", "completed", "cancelled"];
+  if (!allowed.includes(status)) throw new Error("Unknown status");
+  const order = await prisma.order.update({
+    where: { id: orderId },
+    data: { status },
+    select: { clientId: true },
+  });
+  revalidatePath("/clients");
+  revalidatePath("/clients/register");
+  revalidatePath(`/clients/${order.clientId}`);
 }
 
 // ─── Payments ─────────────────────────────────────────────────────────

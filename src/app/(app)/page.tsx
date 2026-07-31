@@ -47,7 +47,7 @@ export default async function DashboardPage() {
     }),
     prisma.cashEntry.findMany(),
     prisma.order.findMany({
-      where: { status: { in: ["open", "partial"] } },
+      where: { status: { in: ["upcoming", "active"] } },
       include: {
         client: true,
         items: true,
@@ -71,7 +71,7 @@ export default async function DashboardPage() {
     }),
     prisma.order.findMany({
       where: {
-        status: { in: ["open", "partial"] },
+        status: { in: ["upcoming", "active"] },
         expectedDeliveryDate: { lt: today },
       },
       include: { client: true },

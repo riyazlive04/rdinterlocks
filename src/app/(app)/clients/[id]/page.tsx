@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate } from "@/lib/format";
+import { orderStatusLabel, orderStatusTone } from "@/lib/order-status";
 import { PaymentForm } from "./payment-form";
 import { DeleteOrder } from "./delete-order";
 import { DeleteCharge } from "./delete-charge";
@@ -199,17 +200,7 @@ export default async function ClientDetailPage({
                       </div>
                       <div className="num text-[14px] font-bold mt-0.5">{formatINR(oTotal)}</div>
                     </div>
-                    <Pill
-                      tone={
-                        o.status === "complete"
-                          ? "success"
-                          : o.status === "partial"
-                            ? "blue"
-                            : "warning"
-                      }
-                    >
-                      {o.status}
-                    </Pill>
+                    <Pill tone={orderStatusTone(o.status)}>{orderStatusLabel(o.status)}</Pill>
                   </div>
                   {(o.items.length > 0 || o.slabItems.length > 0) && (
                     <div className="bg-slate-50 rounded-lg p-2 text-[12px] mb-2">

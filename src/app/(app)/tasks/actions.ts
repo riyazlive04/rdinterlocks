@@ -31,19 +31,29 @@ export async function createTask(input: z.infer<typeof createSchema>) {
   revalidatePath("/tasks");
 }
 
-// The assignee (or an admin) flips a task done / open.
-export async function setTaskStatus(id: string, done: boolean) {
+// The assignee (or an admin) says where the task stands: work in progress,
+// completed, or not completed. "Not completed" has to say why — that reason is
+// the whole point of the status, so it is enforced here and not just in the UI.
+const TASK_STATUSES = ["wip", "done", "not_done"];
+
+export async function setTaskStatus(id: string, status: string, reason?: string) {
   const session = await requireSession();
+  if (!TASK_STATUSES.includes(status)) throw new Error("Unknown status");
   const task = await prisma.task.findUnique({ where: { id } });
   if (!task) throw new Error("Task not found");
   if (!isAdmin(session.role) && task.assignedToId !== session.userId) {
     throw new Error("You can only update your own tasks");
   }
+  const trimmed = reason?.trim() || "";
+  if (status === "not_done" && !trimmed) {
+    throw new Error("Say why it wasn't completed");
+  }
   await prisma.task.update({
     where: { id },
     data: {
-      status: done ? "done" : "open",
-      completedAt: done ? new Date() : null,
+      status,
+      statusReason: status === "not_done" ? trimmed : null,
+      completedAt: status === "wip" ? null : new Date(),
     },
   });
   revalidatePath("/tasks");

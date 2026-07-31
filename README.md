@@ -26,22 +26,56 @@ Full-stack factory operations system: production, sales, expenses, tipper logist
 
 The default `/public/logo.svg` is a placeholder. Drop your real PNG at `/public/logo.png` and it will be used on PDF letterhead automatically.
 
-## Eight operational modules
+## Operational modules
 
 | Module | What it tracks |
 |---|---|
 | **Daily Production** | Bricks made per day with operators, cement bags used, piece-rate split |
-| **Expense** | Open category list (Cement, Diesel, EB, Mould, etc.) — admin extensible |
+| **Expense** | Open category list (Cement, Diesel, EB, Mould, Interest, Debt, Tipper Due…) — admin extensible |
 | **Tipper** | Own RD trucks (income from rent + EMI) and vendor (AVM) trucks (rent paid) |
+| **AVM advance & rent** | Per vendor: rent charged by their trips, advance paid, balance settled, still due |
+| **Dies (moulds)** | Every die, both its faces (side 1 → side 2), purchase cost and ₹ per 1000 bricks |
 | **Mason** | Site-by-site brick laying with rates from the size × construction-type matrix |
-| **Loading** | Piece-rate truck loading wages |
+| **Loading** | Piece-rate loading wages — several brick sizes on one trip, in one entry |
+| **Sales register** | The paper book as one screen: one wide row per order |
 | **Clients & Sales** | Client → Order → multi-Delivery → Payments + add-ons + returns + balance |
 | **Employees** | Drivers/watchmen/staff — daily or monthly pay, attendance, advances, payouts |
+| **Tasks** | Admin assigns work; the assignee marks it in progress, completed, or not completed (with a reason) |
 | **Cashbook** | Unified ledger — auto-pulls from operations, plus manual entries |
+
+### Sales register
+
+`/clients/register` mirrors the office's notebook — date, number, name, location,
+brick size, room/compound, rate, total bricks, total amount, advance, balance, note —
+as a single wide table with a one-line entry form. Saving a row creates (or reuses)
+the client, opens the order and books the advance in one go, so nothing has to be
+entered twice. Orders sit in one of three states, filterable from the tabs and
+changeable by tapping the chip:
+
+- **Upcoming** — nothing delivered yet and the delivery date is still ahead
+- **Active** — partly delivered, or due now / overdue
+- **Completed** — everything ordered has gone out
+
+### Transport accounting
+
+A loading entry takes the shifting charge **once** and books the right entries itself:
+
+- **Own RD tipper** — income on the tipper (real cash in) *and* the same amount as a
+  transport expense against that tipper. The expense side is internal, so the cash book
+  still shows only the payment that really happened.
+- **Rented (AVM) tipper** — an expense only, recorded as a payable. Cash moves when the
+  advance or the rent balance is entered on the AVM page, so no rupee is counted twice.
+
+The **Tipper P&L** report puts rent earned against rent paid and running costs
+(diesel, oil, spares, EMI) per truck. Those internal loading expenses are excluded
+from the cost side — they carry a `loadGroupId`, which is how they're told apart.
 
 ## Reports (single page)
 
-- 8 tabs: Production · Sales · Expense · Tipper · Mason · Loading · Wages · Cashbook
+- Tabs: Summary · Production · Sales · Expense · Tipper · **Tipper P&L** · **AVM advance & rent** ·
+  **Dies** · Mason · Loading · Salary (detail) · **Salary weekly / monthly** · Cashbook
+- **Salary weekly / monthly** rolls every worker up per week or per month — earned,
+  advance taken, salary paid, still due — which is the sheet wages are settled from
 - Date range presets + custom from–to
 - Filters by client / brick size / category / vendor / tipper as relevant
 - One-click **Excel** (`.xlsx`) and **PDF** download with logo letterhead
@@ -155,9 +189,18 @@ day-first.
 
 ```bash
 npm run db:push      # apply schema.prisma to Supabase
+npm run db:upgrade   # idempotent catch-up on a LIVE db (see below)
 npm run db:seed      # wipe + reseed sample data
 npm run db:studio    # open Prisma Studio (browse/edit data)
 ```
+
+### Upgrading a live database
+
+`db:seed` wipes everything, so it is only for a fresh install. On a database with
+real data, run `db:push` then **`db:upgrade`** — it adds any missing expense
+category, moves old order statuses (`open`/`partial`/`complete`) onto
+`upcoming`/`active`/`completed`, and moves old task statuses (`open`) onto `wip`.
+It touches nothing else and is safe to run repeatedly.
 
 ## Project layout
 

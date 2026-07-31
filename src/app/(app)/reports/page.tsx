@@ -16,9 +16,13 @@ const kinds: Array<{ k: ReportKind | "summary"; label: string }> = [
   { k: "sales", label: "Sales" },
   { k: "expense", label: "Expense" },
   { k: "tipper", label: "Tipper" },
+  { k: "tipperpl", label: "Tipper P&L" },
+  { k: "avm", label: "AVM advance & rent" },
+  { k: "die", label: "Dies" },
   { k: "mason", label: "Mason" },
   { k: "loading", label: "Loading" },
-  { k: "wages", label: "Salary" },
+  { k: "wages", label: "Salary (detail)" },
+  { k: "salarysummary", label: "Salary weekly / monthly" },
   { k: "cashbook", label: "Cashbook" },
 ];
 
@@ -81,20 +85,21 @@ export default async function ReportsPage({
     vendorId?: string;
     tipperId?: string;
     personId?: string;
+    period?: string;
   }>;
 }) {
   const session = await requireArea("reports");
   const canRevenue = can(session, "revenue");
-  // Summary (net profit/income) and Cashbook expose revenue — hide them from
-  // users without the "revenue" permission.
-  const visibleKinds = canRevenue
-    ? kinds
-    : kinds.filter((k) => k.k !== "summary" && k.k !== "cashbook");
+  // Summary (net profit/income), Cashbook and the tipper P&L expose revenue —
+  // hide them from users without the "revenue" permission.
+  const revenueKinds = new Set(["summary", "cashbook", "tipperpl"]);
+  const visibleKinds = canRevenue ? kinds : kinds.filter((k) => !revenueKinds.has(k.k));
 
   const sp = await searchParams;
   let kind = (sp?.kind ?? (canRevenue ? "summary" : "production")) as ReportKind | "summary";
-  if (!canRevenue && (kind === "summary" || kind === "cashbook")) kind = "production";
+  if (!canRevenue && revenueKinds.has(kind)) kind = "production";
   const range = sp?.range ?? "month";
+  const period: "week" | "month" = sp?.period === "week" ? "week" : "month";
   const { from, to } = rangeFor(range, sp?.from, sp?.to);
 
   const [clients, sizes, categories, vendors, tippers, operators, masons, loaders, employees] =
@@ -130,6 +135,7 @@ export default async function ReportsPage({
       vendorId: sp?.vendorId,
       tipperId: sp?.tipperId,
       personId: sp?.personId,
+      period: sp?.period,
       ...overrides,
     };
     for (const [k, v] of Object.entries(merged)) {
@@ -151,6 +157,7 @@ export default async function ReportsPage({
     if (sp?.vendorId) u.set("vendorId", sp.vendorId);
     if (sp?.tipperId) u.set("tipperId", sp.tipperId);
     if (sp?.personId) u.set("personId", sp.personId);
+    if (kind === "salarysummary") u.set("period", period);
     return `/api/export?${u.toString()}`;
   };
 
@@ -280,13 +287,33 @@ export default async function ReportsPage({
                   buildHref={(v) => buildUrl({ tipperId: v })}
                 />
               )}
-              {kind === "wages" && people.length > 0 && (
+              {(kind === "wages" || kind === "salarysummary") && people.length > 0 && (
                 <FilterDropdown
                   label="Person"
                   value={sp?.personId}
                   options={people}
                   buildHref={(v) => buildUrl({ personId: v })}
                 />
+              )}
+              {kind === "salarysummary" && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Roll up by
+                  </span>
+                  {(["week", "month"] as const).map((p) => (
+                    <Link
+                      key={p}
+                      href={buildUrl({ period: p })}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold capitalize ${
+                        period === p
+                          ? "bg-brand-blue text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {p}
+                    </Link>
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -306,6 +333,7 @@ export default async function ReportsPage({
           vendorId={sp?.vendorId}
           tipperId={sp?.tipperId}
           personId={sp?.personId}
+          period={period}
         />
       )}
     </>
@@ -482,6 +510,7 @@ async function LedgerSection({
   vendorId?: string;
   tipperId?: string;
   personId?: string;
+  period?: "week" | "month";
 }) {
   const data = await getReportData({ from, to, kind, ...filters });
   const totalEntries = data.sections.reduce((s, sec) => s + sec.rows.length, 0);

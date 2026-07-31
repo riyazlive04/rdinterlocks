@@ -10,11 +10,18 @@ export type TaskDTO = {
   title: string;
   details: string | null;
   status: string;
+  statusReason: string | null;
   dueDate: string | null; // ISO date or null
   assignedToName: string;
   createdByName: string | null;
 };
 type UserOption = { id: string; name: string; role: string };
+
+const STATUSES: Array<{ key: string; label: string; short: string; tone: "warning" | "success" | "danger" }> = [
+  { key: "wip", label: "Work in progress", short: "In progress", tone: "warning" },
+  { key: "done", label: "Completed", short: "Completed", tone: "success" },
+  { key: "not_done", label: "Not completed", short: "Not completed", tone: "danger" },
+];
 
 export function TasksView({
   admin,
@@ -22,7 +29,7 @@ export function TasksView({
   myTasks,
   allTasks,
   onCreate,
-  onToggle,
+  onSetStatus,
   onDelete,
 }: {
   admin: boolean;
@@ -35,7 +42,7 @@ export function TasksView({
     assignedToId: string;
     dueDate?: string;
   }) => Promise<void>;
-  onToggle: (id: string, done: boolean) => Promise<void>;
+  onSetStatus: (id: string, status: string, reason?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
   const router = useRouter();
@@ -68,11 +75,25 @@ export function TasksView({
     });
   };
 
-  const toggle = (t: TaskDTO) =>
+  // "Not completed" must carry a reason, so ask for it before saving.
+  const setStatus = (t: TaskDTO, status: string) => {
+    if (status === t.status) return;
+    let reason: string | undefined;
+    if (status === "not_done") {
+      const answer = prompt(`Why wasn't "${t.title}" completed?`, t.statusReason ?? "");
+      if (answer === null) return;
+      if (!answer.trim()) return alert("A reason is needed to mark it not completed.");
+      reason = answer.trim();
+    }
     startTransition(async () => {
-      await onToggle(t.id, t.status !== "done");
-      router.refresh();
+      try {
+        await onSetStatus(t.id, status, reason);
+        router.refresh();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Could not update the task");
+      }
     });
+  };
 
   const remove = (t: TaskDTO) => {
     if (!confirm(`Delete task "${t.title}"?`)) return;
@@ -84,58 +105,81 @@ export function TasksView({
 
   const today = formatISODate(new Date());
   const taskRow = (t: TaskDTO, opts: { showAssignee?: boolean; canDelete?: boolean }) => {
-    const done = t.status === "done";
-    const overdue = !done && t.dueDate && t.dueDate < today;
+    const closed = t.status !== "wip";
+    const overdue = !closed && t.dueDate && t.dueDate < today;
     return (
-      <div key={t.id} className="flex items-start gap-3 py-2.5">
-        <button
-          onClick={() => toggle(t)}
-          disabled={isPending}
-          className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
-            done
-              ? "bg-emerald-600 border-emerald-600 text-white"
-              : "bg-white border-slate-300 hover:border-slate-500"
-          }`}
-          aria-label={done ? "Mark as open" : "Mark as done"}
-        >
-          {done && <Icon.Check size={13} stroke={3} />}
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className={`text-[13px] font-semibold ${done ? "line-through text-slate-400" : "text-ink"}`}>
-            {t.title}
-          </div>
-          {t.details && (
-            <div className={`text-[12px] mt-0.5 ${done ? "text-slate-400" : "text-slate-600"}`}>
-              {t.details}
+      <div key={t.id} className="py-2.5">
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <div
+              className={`text-[13px] font-semibold ${
+                t.status === "done" ? "line-through text-slate-400" : "text-ink"
+              }`}
+            >
+              {t.title}
             </div>
-          )}
-          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-            {opts.showAssignee && <Pill tone="slate">{t.assignedToName}</Pill>}
-            {t.dueDate && (
-              <span className={`text-[11px] font-semibold ${overdue ? "text-brand-red" : "text-slate-500"}`}>
-                {overdue ? "Overdue · " : "Due "}
-                {formatShortDate(new Date(t.dueDate))}
-              </span>
+            {t.details && (
+              <div className={`text-[12px] mt-0.5 ${closed ? "text-slate-400" : "text-slate-600"}`}>
+                {t.details}
+              </div>
             )}
-            {done && <Pill tone="success">done</Pill>}
+            {t.status === "not_done" && t.statusReason && (
+              <div className="text-[12px] mt-0.5 text-red-700">Reason: {t.statusReason}</div>
+            )}
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              {opts.showAssignee && <Pill tone="slate">{t.assignedToName}</Pill>}
+              {t.dueDate && (
+                <span
+                  className={`text-[11px] font-semibold ${
+                    overdue ? "text-brand-red" : "text-slate-500"
+                  }`}
+                >
+                  {overdue ? "Overdue · " : "Due "}
+                  {formatShortDate(new Date(t.dueDate))}
+                </span>
+              )}
+            </div>
           </div>
+          {opts.canDelete && (
+            <button
+              onClick={() => remove(t)}
+              disabled={isPending}
+              className="w-8 h-8 rounded-md hover:bg-red-50 flex items-center justify-center text-red-600 shrink-0"
+              aria-label="Delete task"
+            >
+              <Icon.Trash size={14} />
+            </button>
+          )}
         </div>
-        {opts.canDelete && (
-          <button
-            onClick={() => remove(t)}
-            disabled={isPending}
-            className="w-8 h-8 rounded-md hover:bg-red-50 flex items-center justify-center text-red-600 shrink-0"
-            aria-label="Delete task"
-          >
-            <Icon.Trash size={14} />
-          </button>
-        )}
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {STATUSES.map((s) => {
+            const active = t.status === s.key;
+            return (
+              <button
+                key={s.key}
+                onClick={() => setStatus(t, s.key)}
+                disabled={isPending}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition ${
+                  active
+                    ? s.tone === "success"
+                      ? "bg-emerald-600 text-white"
+                      : s.tone === "danger"
+                        ? "bg-red-600 text-white"
+                        : "bg-amber-500 text-white"
+                    : "bg-white text-slate-600 border border-slate-200 hover:border-slate-400"
+                }`}
+              >
+                {active && <Icon.Check size={11} stroke={3} />} {s.short}
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   };
 
-  const openAll = allTasks.filter((t) => t.status !== "done");
-  const doneAll = allTasks.filter((t) => t.status === "done");
+  const openAll = allTasks.filter((t) => t.status === "wip");
+  const doneAll = allTasks.filter((t) => t.status !== "wip");
 
   return (
     <div className="space-y-4">
@@ -209,7 +253,7 @@ export function TasksView({
         <Card>
           <h3 className="text-[14px] font-bold mb-1">
             All assigned tasks{" "}
-            <span className="text-slate-400 font-normal">({openAll.length} open)</span>
+            <span className="text-slate-400 font-normal">({openAll.length} in progress)</span>
           </h3>
           {allTasks.length === 0 ? (
             <EmptyState title="No tasks yet" sub="Assign the first task above." />
@@ -221,7 +265,7 @@ export function TasksView({
               {doneAll.length > 0 && (
                 <div className="mt-3 pt-2 border-t border-slate-100">
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Completed
+                    Closed - completed &amp; not completed
                   </div>
                   <div className="divide-y divide-slate-100">
                     {doneAll.map((t) => taskRow(t, { showAssignee: true, canDelete: true }))}

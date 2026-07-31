@@ -15,6 +15,7 @@ export default async function TasksPage() {
     title: string;
     details: string | null;
     status: string;
+    statusReason: string | null;
     dueDate: Date | null;
     assignedTo?: { name: string } | null;
     createdBy?: { name: string } | null;
@@ -23,13 +24,14 @@ export default async function TasksPage() {
     title: t.title,
     details: t.details,
     status: t.status,
+    statusReason: t.statusReason,
     dueDate: t.dueDate ? formatISODate(t.dueDate) : null,
     assignedToName: t.assignedTo?.name ?? "-",
     createdByName: t.createdBy?.name ?? null,
   });
 
-  // "open" before "done", then soonest due date first.
-  const order = [{ status: "asc" as const }, { dueDate: "asc" as const }, { createdAt: "desc" as const }];
+  // Soonest due date first; the view splits in-progress from closed itself.
+  const order = [{ dueDate: "asc" as const }, { createdAt: "desc" as const }];
 
   const [myTasksRaw, allTasksRaw, assignable] = await Promise.all([
     prisma.task.findMany({
@@ -66,9 +68,9 @@ export default async function TasksPage() {
           "use server";
           await createTask(d);
         }}
-        onToggle={async (id, done) => {
+        onSetStatus={async (id, status, reason) => {
           "use server";
-          await setTaskStatus(id, done);
+          await setTaskStatus(id, status, reason);
         }}
         onDelete={async (id) => {
           "use server";

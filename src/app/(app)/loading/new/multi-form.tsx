@@ -24,13 +24,13 @@ type ChargeLine = {
   amount: number;
   vendorId?: string;
 };
+type SizeLine = { brickSizeId: string; brickCount: number };
 type Sub = {
   date: string;
   loadType: LoadType;
-  brickSizeId?: string;
   clientId?: string;
   vehicleRequested?: string;
-  brickCount: number;
+  items: Array<{ brickSizeId?: string; brickCount: number }>;
   loading?: Crew;
   unloading?: Crew;
   tipperId?: string;
@@ -39,8 +39,8 @@ type Sub = {
 };
 
 const CHARGE_PRESETS: Array<{ name: string; unit: string }> = [
-  { name: "Shifting charge", unit: "trip" },
-  { name: "Lintel slab", unit: "pcs" },
+  { name: "Shifting charges", unit: "trip" },
+  { name: "Lintel Beam", unit: "pcs" },
   { name: "Cement", unit: "bag" },
 ];
 
@@ -64,10 +64,14 @@ export function LoadingMultiForm({
 
   const [date, setDate] = useState(formatISODate(new Date()));
   const [loadType, setLoadType] = useState<LoadType>("brick");
-  const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
+  // One line per brick size on the trip, so a lorry carrying 6" AND 8" is a
+  // single entry instead of two.
+  const [lines, setLines] = useState<SizeLine[]>([
+    { brickSizeId: sizes[0]?.id ?? "", brickCount: 1000 },
+  ]);
+  const [slabCount, setSlabCount] = useState<number>(0);
   const [clientId, setClientId] = useState<string>("");
   const [vehicleRequested, setVehicleRequested] = useState<string>("");
-  const [brickCount, setBrickCount] = useState<number>(1000);
 
   const [tipperId, setTipperId] = useState<string>("");
   const [tipperCharge, setTipperCharge] = useState<number>(0);
@@ -88,6 +92,24 @@ export function LoadingMultiForm({
 
   const showLoad = mode !== "unloading";
   const showUnload = mode !== "loading";
+
+  // Every crew is paid on the whole trip, so the split tables and the salary
+  // work off the combined count across all size lines.
+  const brickCount = isLintel
+    ? slabCount
+    : lines.reduce((s, l) => s + (l.brickCount || 0), 0);
+
+  const addLine = () =>
+    setLines((l) => [
+      ...l,
+      {
+        brickSizeId: sizes.find((s) => !l.some((x) => x.brickSizeId === s.id))?.id ?? "",
+        brickCount: 0,
+      },
+    ]);
+  const updateLine = (i: number, patch: Partial<SizeLine>) =>
+    setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const removeLine = (i: number) => setLines((l) => l.filter((_, idx) => idx !== i));
 
   const tipper = tippers.find((t) => t.id === tipperId);
   const tipperIsOwn = tipper?.ownership === "own";
@@ -219,6 +241,15 @@ export function LoadingMultiForm({
   const submit = () => {
     setError(null);
     if (brickCount <= 0) return setError(`${isLintel ? "Slab" : "Brick"} count must be more than 0`);
+    if (!isLintel) {
+      const filled = lines.filter((l) => l.brickCount > 0);
+      const seen = new Set<string>();
+      for (const l of filled) {
+        const key = l.brickSizeId || "mixed";
+        if (seen.has(key)) return setError("Each brick size can only be listed once");
+        seen.add(key);
+      }
+    }
     if (showLoad && loadSel.size === 0) return setError("Pick at least one person who loaded");
     if (showLoad && loadRate <= 0) return setError("Loading rate must be more than 0");
     if (showUnload && unloadSel.size === 0) return setError("Pick at least one person who unloaded");
@@ -232,10 +263,13 @@ export function LoadingMultiForm({
         await onSubmit({
           date,
           loadType,
-          brickSizeId: isLintel ? undefined : brickSizeId || undefined,
           clientId: clientId || undefined,
           vehicleRequested: vehicleRequested.trim() || undefined,
-          brickCount,
+          items: isLintel
+            ? [{ brickCount: slabCount }]
+            : lines
+                .filter((l) => l.brickCount > 0)
+                .map((l) => ({ brickSizeId: l.brickSizeId || undefined, brickCount: l.brickCount })),
           loading: showLoad
             ? { workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: loadRate }
             : undefined,
@@ -318,26 +352,81 @@ export function LoadingMultiForm({
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        {!isLintel && (
-          <Field label="Brick size (optional)">
-            <Select value={brickSizeId} onChange={(e) => setBrickSizeId(e.target.value)}>
-              <option value="">- mixed -</option>
-              {sizes.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
+        {isLintel && (
+          <Field label={`Total ${unit}`}>
+            <Input
+              type="number"
+              value={slabCount || ""}
+              onChange={(e) => setSlabCount(Number(e.target.value || 0))}
+            />
           </Field>
         )}
-        <Field label={`Total ${unit}`}>
-          <Input
-            type="number"
-            value={brickCount || ""}
-            onChange={(e) => setBrickCount(Number(e.target.value || 0))}
-          />
-        </Field>
       </div>
+
+      {/* Size lines — one row per brick size on this trip (6" and 8" together) */}
+      {!isLintel && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
+              Bricks loaded
+            </div>
+            <button
+              type="button"
+              onClick={addLine}
+              className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+            >
+              + Add another size
+            </button>
+          </div>
+          <div className="space-y-2">
+            {lines.map((l, i) => (
+              <div key={i} className="grid grid-cols-12 gap-2 items-end bg-slate-50 rounded-xl p-2.5">
+                <div className="col-span-6 sm:col-span-6">
+                  <Field label="Brick size">
+                    <Select
+                      value={l.brickSizeId}
+                      onChange={(e) => updateLine(i, { brickSizeId: e.target.value })}
+                    >
+                      <option value="">- mixed -</option>
+                      {sizes.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+                <div className="col-span-4 sm:col-span-5">
+                  <Field label="Bricks">
+                    <Input
+                      type="number"
+                      value={l.brickCount || ""}
+                      onChange={(e) => updateLine(i, { brickCount: Number(e.target.value || 0) })}
+                    />
+                  </Field>
+                </div>
+                <div className="col-span-2 sm:col-span-1 flex justify-end">
+                  {lines.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeLine(i)}
+                      className="w-9 h-9 rounded-md hover:bg-slate-200 inline-flex items-center justify-center text-slate-500"
+                      title="Remove this size"
+                    >
+                      <Icon.Trash size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1.5">
+            Total on this trip{" "}
+            <span className="num font-bold text-ink">{formatNumber(brickCount)}</span> bricks. Each
+            size is saved on its own so 6&quot; and 8&quot; stay separate in the reports.
+          </div>
+        </div>
+      )}
 
       <div className="grid sm:grid-cols-2 gap-3 mt-3">
         <Field label="Customer (optional)">
@@ -377,7 +466,7 @@ export function LoadingMultiForm({
             </Select>
           </Field>
           {tipperId && (
-            <Field label="Shifting / rent charge (₹)">
+            <Field label="Shifting / rent charge (₹)" hint="Enter the amount once">
               <Input
                 type="number"
                 value={tipperCharge || ""}
@@ -387,15 +476,20 @@ export function LoadingMultiForm({
           )}
         </div>
         {tipperId && tipperCharge > 0 && (
-          <div
-            className={clsx(
-              "text-[11px] mt-1 font-semibold",
-              tipperIsOwn ? "text-emerald-700" : "text-brand-red"
+          <div className="text-[11px] mt-1 font-semibold">
+            {tipperIsOwn ? (
+              <span className="text-slate-600">
+                Own RD tipper → <span className="text-emerald-700">+{formatINR(tipperCharge)}</span>{" "}
+                income on the tipper and{" "}
+                <span className="text-brand-red">−{formatINR(tipperCharge)}</span> transport expense,
+                both recorded automatically.
+              </span>
+            ) : (
+              <span className="text-slate-600">
+                Rented tipper → <span className="text-brand-red">−{formatINR(tipperCharge)}</span>{" "}
+                expense recorded automatically. Pay it from the AVM page (advance / tipper due).
+              </span>
             )}
-          >
-            {tipperIsOwn
-              ? `RD tipper → +${formatINR(tipperCharge)} income`
-              : `Vendor tipper → −${formatINR(tipperCharge)} expense`}
           </div>
         )}
       </div>
