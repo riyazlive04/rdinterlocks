@@ -11,6 +11,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:upgrade": "tsx prisma/upgrade.ts",
     "db:studio": "prisma studio",
+    "docs:flow": "node scripts/flow-diagram.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {
