@@ -9,6 +9,7 @@ type ClientOption = { id: string; name: string; location: string | null };
 
 export type ConvertDefaults = {
   customerName: string;
+  phone: string;
   place: string;
   brickSizeId: string;
   constructionTypeId: string;
@@ -41,7 +42,7 @@ export function ConvertLeadForm({
   const [clientId, setClientId] = useState(defaults.suggestedClientId ?? "");
   const [name, setName] = useState(defaults.customerName);
   const [location, setLocation] = useState(defaults.place);
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(defaults.phone);
 
   const [createOrder, setCreateOrder] = useState(
     !!(defaults.brickSizeId && defaults.constructionTypeId && defaults.brickCount)
@@ -129,7 +130,7 @@ export function ConvertLeadForm({
             <Field label="Location">
               <Input value={location} onChange={(e) => setLocation(e.target.value)} />
             </Field>
-            <Field label="Phone" hint="Not captured by the call">
+            <Field label="Phone" hint={defaults.phone ? undefined : "Not captured by the call"}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </Field>
           </div>

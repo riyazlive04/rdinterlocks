@@ -13,6 +13,7 @@ import { convertLeadCore, type ConvertInput } from "@/lib/lead-convert";
 
 const leadSchema = z.object({
   customerName: z.string().default(""),
+  phoneNumber: z.string().default(""),
   place: z.string().default(""),
   brickType: z.string().default(""),
   brickCount: z.number().int().nonnegative().nullable().default(null),
@@ -41,6 +42,7 @@ export async function updateLead(id: string, input: z.infer<typeof leadSchema>) 
     where: { id },
     data: {
       customerName: p.customerName.trim(),
+      phoneNumber: p.phoneNumber.trim(),
       place: p.place.trim(),
       brickType: p.brickType.trim(),
       brickCount: p.brickCount,

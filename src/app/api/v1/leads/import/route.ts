@@ -17,20 +17,24 @@ import {
 // Ingest one structured lead extracted from a recorded call by the Transcriber.
 //
 // Auth        : Authorization: Bearer <key>   (or X-API-Key: <key>)
-// Idempotency : keyed on callId — re-sending the same call updates, never duplicates
+// Idempotency : keyed on contactKey — one contact, however many times they
+//               call in, is one lead. callId still identifies the individual
+//               call: re-sending the same callId updates the lead without
+//               bumping callSequence again, while a new callId under the same
+//               contactKey is counted as another touchpoint (isFollowUp=true).
 // Versioning  : the path is the contract. Additive changes ship in v1; anything
 //               that would break an existing caller ships as /api/v2/… instead.
 //
-//   201 created   — first time this callId was seen
-//   200 updated   — callId already known, record merged
-//   400 bad input — unparseable body, or no callId to key on
+//   201 created   — first time this contactKey was seen
+//   200 updated   — contactKey already known, record merged (see isFollowUp/callSequence)
+//   400 bad input — unparseable body, or no contactKey to key on
 //   401 no auth   — missing or invalid API key
 //   409 conflict  — the lead was already converted to a client; import refused
 //   413 too large — body over the size cap
 //   429 throttled — rate limit exceeded; see Retry-After
 //   500 error     — unexpected server failure (or missing key configuration)
 //
-// Partial extractions are expected and accepted: any of the ten fields may be
+// Partial extractions are expected and accepted: nearly every field may be
 // absent, and are stored as "" / null with the names listed back in
 // `missingFields`. Unknown fields are preserved in the lead's `extra` object,
 // so the Transcriber can start sending a new field before this app models it.
@@ -48,7 +52,7 @@ type ErrorCode =
   | "payload_too_large"
   | "invalid_json"
   | "invalid_payload"
-  | "missing_call_id"
+  | "missing_contact_key"
   | "already_converted"
   | "internal_error";
 
@@ -200,21 +204,28 @@ export async function POST(req: NextRequest) {
     // ─── 5. Normalise ─────────────────────────────────────────────────
     const { values, missingFields, warnings, extra } = normalizeLeadPayload(body);
 
-    // The one genuinely required field. Without it there is no idempotency key,
-    // so every retry would create a duplicate — the exact thing this endpoint
-    // exists to prevent. Everything else may be blank.
-    if (!values.callId) {
+    // The one genuinely required field. Without it there is no way to group
+    // repeat calls from the same contact into one lead — the exact thing this
+    // endpoint exists to do. Everything else, including callId, may be blank.
+    if (!values.contactKey) {
       const message =
-        "Field 'callId' is required — it is the idempotency key for the call. Accepted aliases: callId, call_id, recordingId, conversationId, sessionId, id.";
+        "Field 'contactKey' is required — it is the idempotency key that groups every call from the same contact into one lead. Accepted aliases: contactKey, contactId, customerKey, customerId, phoneKey. Falls back to phoneNumber or phoneMasked when omitted.";
       await audit({
-        callId: null,
+        callId: values.callId || null,
         leadId: null,
         payload: body,
         outcome: "rejected",
         statusCode: 400,
         message,
       });
-      return fail(400, "missing_call_id", message, requestId, { field: "callId" }, limitHeaders);
+      return fail(
+        400,
+        "missing_contact_key",
+        message,
+        requestId,
+        { field: "contactKey" },
+        limitHeaders
+      );
     }
 
     // ?mode=replace overwrites every field, including with blanks. The default
@@ -226,7 +237,7 @@ export async function POST(req: NextRequest) {
 
     if (result.outcome === "conflict") {
       await audit({
-        callId: values.callId,
+        callId: values.callId || null,
         leadId: result.lead.id,
         payload: body,
         outcome: "conflict",
@@ -238,14 +249,14 @@ export async function POST(req: NextRequest) {
         "already_converted",
         result.message,
         requestId,
-        { leadId: result.lead.id, callId: result.lead.callId },
+        { leadId: result.lead.id, contactKey: result.lead.contactKey, callId: result.lead.callId },
         limitHeaders
       );
     }
 
     const status = result.outcome === "created" ? 201 : 200;
     await audit({
-      callId: values.callId,
+      callId: values.callId || null,
       leadId: result.lead.id,
       payload: body,
       outcome: result.outcome,

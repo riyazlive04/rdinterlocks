@@ -762,10 +762,17 @@ model Advance {
 // payload of every request is kept in LeadImport.
 model Lead {
   id     String @id @default(cuid())
-  // Idempotency key: one recorded call = one lead. Re-sending the same callId
-  // (e.g. after the Transcriber re-runs its extraction) updates this row
-  // instead of creating a duplicate.
-  callId String @unique
+  // Idempotency + grouping key: one CONTACT (caller) = one lead, however many
+  // times they call in. Replaces callId as the upsert key so a customer who
+  // calls three times becomes one lead with callSequence 3, not three
+  // unrelated leads.
+  contactKey String @unique
+
+  // Most recent call attributed to this contact. No longer unique — many
+  // calls can map to the same contactKey. A retried extraction for the same
+  // callId must not be double-counted; see the LeadImport lookup in
+  // leads-import.ts for how that's detected without a dedicated table.
+  callId String @default("")
 
   customerName     String    @default("")
   place            String    @default("")
@@ -779,6 +786,17 @@ model Lead {
   // new | quoted | negotiating | won | lost. Unrecognised values are stored
   // verbatim so the Transcriber can introduce a new stage without a deploy.
   quotationStage   String    @default("new")
+
+  // Unmasked phone, sent by newer calls. phoneMasked is kept alongside it for
+  // calls where only a masked number was ever available, so display can fall
+  // back without losing the fact that a number exists at all.
+  phoneNumber String @default("")
+  phoneMasked String @default("")
+
+  // How many distinct calls this contact has made, and whether this lead has
+  // seen more than one — what makes the Transcriber's follow-up view possible.
+  callSequence Int     @default(1)
+  isFollowUp   Boolean @default(false)
 
   // Best-effort links to master data, set when the spoken text matches a known
   // brick size / construction type. Null when it doesn't — the free text above
@@ -811,6 +829,7 @@ model Lead {
   @@index([followUpDate])
   @@index([createdAt])
   @@index([status])
+  @@index([callId])
 }
 
 // Append-only audit of every import request, including the ones that were

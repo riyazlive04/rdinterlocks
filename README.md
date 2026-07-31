@@ -117,8 +117,10 @@ curl -X POST https://<host>/api/v1/leads/import \
   -H "Authorization: Bearer $INTEGRATION_KEY" \
   -H "Content-Type: application/json" \
   -d '{
+    "contactKey": "+91-98765-43210",
     "callId": "CALL-9001",
-    "customerName": "Ravi Kumar",
+    "contactName": "Ravi Kumar",
+    "phoneNumber": "+91-98765-43210",
     "place": "Salem",
     "typeOfBricks": "6\"",
     "numberOfBricks": 12000,
@@ -133,37 +135,53 @@ curl -X POST https://<host>/api/v1/leads/import \
 
 Field names are matched case- and separator-insensitively, so `customerName`,
 `customer_name` and `Customer Name` are all the same field. Common aliases are accepted
-too (`location` → place, `qty` → numberOfBricks, `rate` → costPerBrick). Values may be
-messy: `"₹1,20,000"`, `"2 lakh"` and `12000` all parse, and `05/08/2026` is read
-day-first.
+too (`location` → place, `qty` → numberOfBricks, `rate` → costPerBrick, `contactName` →
+same field as `customerName`, preferred when both are sent). Values may be messy:
+`"₹1,20,000"`, `"2 lakh"` and `12000` all parse, and `05/08/2026` is read day-first.
 
 **Responses.**
 
 | Code | Meaning |
 |---|---|
-| `201` | New `callId` — lead created |
-| `200` | Known `callId` — lead updated (idempotent re-send) |
-| `400` | Body isn't valid JSON / isn't an object / has no `callId` |
+| `201` | New `contactKey` — lead created |
+| `200` | Known `contactKey` — lead updated (idempotent re-send, or a new call from the same contact) |
+| `400` | Body isn't valid JSON / isn't an object / has no `contactKey` |
 | `401` | Missing or invalid API key |
 | `409` | Lead already converted to a client — import refused, no overwrite |
 | `413` | Body over 1 MB |
 | `429` | Rate limit exceeded — see `Retry-After` |
-| `500` | Server error; retry with the same `callId` |
+| `500` | Server error; retry with the same `contactKey`/`callId` |
 
 ```json
 {
-  "ok": true, "apiVersion": "v1", "requestId": "…", "outcome": "created",
-  "lead": { "id": "…", "callId": "CALL-9001", "…": "…" },
+  "ok": true, "apiVersion": "v1", "requestId": "…", "outcome": "updated",
+  "lead": {
+    "id": "…", "contactKey": "+91-98765-43210", "callId": "CALL-9003",
+    "phoneNumber": "+91-98765-43210", "phoneMasked": "",
+    "callSequence": 3, "isFollowUp": true, "followUpDate": null,
+    "quotationStage": "quoted", "…": "…"
+  },
   "missingFields": ["followUpDate"],
   "warnings": [],
-  "extraFields": ["phone", "recordingUrl"]
+  "extraFields": ["recordingUrl"]
 }
 ```
 
 **Behaviour worth knowing.**
 
-- **Partial data is accepted.** Only `callId` is required — it is the idempotency key.
-  Any other missing field is stored as `""` (text) or `null` (number/date) and listed
+- **Grouped by contact, not by call.** `contactKey` — not `callId` — is the idempotency
+  key. One contact calling three times is one lead with `callSequence: 3`, not three
+  unrelated leads; each delivery after the first comes back with `isFollowUp: true`
+  alongside the lead's existing `followUpDate`/`quotationStage`, which is what makes the
+  Transcriber's own follow-up view meaningful. `callId` still identifies the individual
+  call — re-sending the *same* `callId` updates the lead without bumping `callSequence`
+  again, since that's a retried extraction, not a new touchpoint. If `contactKey` is
+  omitted, it falls back to `phoneNumber` then `phoneMasked`.
+- **Phone has two fields.** `phoneNumber` is the unmasked number; `phoneMasked` is kept
+  for older calls where only a masked number was ever available. Display (and the
+  `/leads` UI) always prefers `phoneNumber`, falling back to `phoneMasked`.
+- **Partial data is accepted.** Only `contactKey` is required. Any other missing field —
+  including `callId` now — is stored as `""` (text) or `null` (number/date) and listed
   back in `missingFields`. The request is never rejected for incompleteness.
 - **Re-imports merge.** A field is overwritten only when the new payload has a non-empty
   value for it, so a later thinner extraction can't blank out good data. Add

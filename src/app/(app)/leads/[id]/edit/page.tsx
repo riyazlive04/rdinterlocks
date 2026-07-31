@@ -27,8 +27,10 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
       />
       <EditLeadForm
         id={lead.id}
+        phoneMasked={lead.phoneMasked}
         initial={{
           customerName: lead.customerName,
+          phoneNumber: lead.phoneNumber,
           place: lead.place,
           brickType: lead.brickType,
           brickCount: lead.brickCount,
