@@ -78,14 +78,28 @@ export default async function LoadingPage({
         }
       />
 
-      <div className="grid sm:grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <Card padding="tight">
           <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
             Bricks handled
           </div>
           <div className="num display text-xl font-bold mt-0.5">
             {formatNumber(
-              works.filter((w) => w.phase !== "unloading").reduce((s, w) => s + w.brickCount, 0)
+              works
+                .filter((w) => w.phase !== "unloading" && w.loadType !== "lintel")
+                .reduce((s, w) => s + w.brickCount, 0)
+            )}
+          </div>
+        </Card>
+        <Card padding="tight">
+          <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+            Lintel slabs
+          </div>
+          <div className="num display text-xl font-bold mt-0.5">
+            {formatNumber(
+              works
+                .filter((w) => w.phase !== "unloading" && w.loadType === "lintel")
+                .reduce((s, w) => s + w.brickCount, 0)
             )}
           </div>
         </Card>
@@ -151,7 +165,7 @@ export default async function LoadingPage({
                   <Th>Customer</Th>
                   <Th>Phase</Th>
                   <Th>Size</Th>
-                  <Th align="right">Bricks</Th>
+                  <Th align="right">Qty</Th>
                   <Th align="right">Rate</Th>
                   <Th align="right">Total</Th>
                   <Th align="right">Action</Th>

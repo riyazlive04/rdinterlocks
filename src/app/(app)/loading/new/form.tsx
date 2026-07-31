@@ -113,7 +113,10 @@ export function LoadingForm({
             )}
           </Select>
         </Field>
-        <Field label="What was handled">
+        {/* Editing ONE saved row, which is either a brick line or the slab
+            line of a trip. New entries take bricks and slabs together on the
+            multi-form instead. */}
+        <Field label="This line is">
           <div className="flex gap-1.5">
             <button
               type="button"

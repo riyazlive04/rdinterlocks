@@ -764,23 +764,30 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         include: { loader: true, operator: true, employee: true, brickSize: true },
       });
       const moneyKeys = ["total"];
-      const numberKeys = ["bricks"];
+      // Slabs travel with the bricks on one entry but are counted in their own
+      // column — adding a slab to a brick tally would make both numbers useless.
+      const numberKeys = ["bricks", "slabs"];
       const { sections, totals } = groupByDate(
         rows,
-        (w) => ({
-          id: w.id,
-          cells: {
-            loader:
-              (w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-") +
-              (w.phase === "unloading" ? " · unload" : ""),
-            size: w.loadType === "lintel" ? "Lintel slab" : w.brickSize?.label ?? "Mixed",
-            // Unloading reuses the same bricks - count them once (on loading)
-            // so the report's brick total isn't doubled.
-            bricks: w.phase === "unloading" ? 0 : w.brickCount,
-            rate: `₹${w.ratePerBrick}`,
-            total: w.totalAmount,
-          },
-        }),
+        (w) => {
+          const isSlab = w.loadType === "lintel";
+          // Unloading reuses the same pieces - count them once (on loading) so
+          // the report's totals aren't doubled.
+          const counted = w.phase === "unloading" ? 0 : w.brickCount;
+          return {
+            id: w.id,
+            cells: {
+              loader:
+                (w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-") +
+                (w.phase === "unloading" ? " · unload" : ""),
+              size: isSlab ? "Lintel slab" : w.brickSize?.label ?? "Mixed",
+              bricks: isSlab ? 0 : counted,
+              slabs: isSlab ? counted : 0,
+              rate: `₹${w.ratePerBrick}`,
+              total: w.totalAmount,
+            },
+          };
+        },
         moneyKeys,
         numberKeys
       );
@@ -793,6 +800,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           { key: "loader", header: "Worker", format: "text" },
           { key: "size", header: "Size", format: "muted" },
           { key: "bricks", header: "Bricks", format: "number", align: "right" },
+          { key: "slabs", header: "Slabs", format: "number", align: "right" },
           { key: "rate", header: "Rate", format: "muted", align: "right", width: "60px" },
           { key: "total", header: "Total", format: "money", align: "right" },
         ],

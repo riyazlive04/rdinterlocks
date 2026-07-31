@@ -41,6 +41,10 @@ const itemSchema = z.object({
   brickCount: z.number().int().positive(),
 });
 
+// Lintel slabs ride on the same lorry as the bricks, so they are part of the
+// same entry rather than a separate one — just their own count, paid at their
+// own rate because a slab is nothing like a brick to lift.
+
 // One physical load of bricks is recorded as a LOADING crew and an optional
 // UNLOADING crew (different people / rate). Both crews split the SAME bricks,
 // so bricks aren't double-counted (the list counts the loading phase only);
@@ -49,13 +53,14 @@ const itemSchema = z.object({
 // a whole.
 const crewSchema = z.object({
   workers: z.array(z.object({ type: workerType, id: z.string().min(1) })).min(1),
-  ratePerBrick: z.number().positive(),
+  ratePerBrick: z.number().nonnegative(),
+  ratePerSlab: z.number().nonnegative().default(0),
 });
 const createSchema = z
   .object({
     date: z.string(),
-    loadType: loadType.default("brick"),
-    items: z.array(itemSchema).min(1),
+    items: z.array(itemSchema).default([]),
+    slabCount: z.number().int().nonnegative().default(0),
     clientId: z.string().optional(),
     vehicleRequested: z.string().optional(),
     loading: crewSchema.optional(),
@@ -70,6 +75,9 @@ const createSchema = z
   })
   .refine((d) => d.loading || d.unloading, {
     message: "Pick a loading crew, an unloading crew, or both",
+  })
+  .refine((d) => d.items.length > 0 || d.slabCount > 0, {
+    message: "Add at least one brick size line or a slab count",
   });
 
 type CreateInput = z.input<typeof createSchema>;
@@ -103,21 +111,26 @@ async function wireTipper(
   if (!tipper) return;
 
   const own = tipper.ownership === "own";
-  const qty = totalBricks(p);
-  const sizeId = p.loadType === "lintel" ? null : p.items[0]?.brickSizeId || null;
+  const bricks = totalBricks(p);
+  // The trip's quantity is the bricks; slabs are called out in the note so the
+  // tipper row doesn't silently add slabs to a brick count.
+  const sizeId = p.items[0]?.brickSizeId || null;
   const loadData = {
     date,
     loadGroupId,
     tipperId: tipper.id,
     vendorId: tipper.vendorId,
-    loadType: "bricks",
+    loadType: bricks > 0 ? "bricks" : "material",
     brickSizeId: sizeId,
-    quantity: qty,
+    materialName: bricks === 0 && p.slabCount > 0 ? "Lintel slabs" : null,
+    quantity: bricks > 0 ? bricks : p.slabCount,
     unit: "pcs",
     toLocation: client?.location ?? null,
     rentAmount: p.tipperCharge,
     rentDirection: own ? "in" : "out",
-    notes: "Auto from loading entry",
+    notes:
+      "Auto from loading entry" +
+      (bricks > 0 && p.slabCount > 0 ? ` (+ ${p.slabCount} lintel slabs)` : ""),
   };
 
   if (own) {
@@ -206,22 +219,29 @@ export async function createLoadingWork(input: CreateInput) {
   const date = new Date(p.date);
   const loadGroupId = randomUUID();
 
-  const rowsFor = (crew: z.infer<typeof crewSchema>, phase: "loading" | "unloading") =>
-    p.items.flatMap((item) => {
+  // A crew is paid for everything it handled on the trip: a row per brick size
+  // and, when the lorry also carried slabs, one more row at the slab rate. The
+  // slab rows keep loadType "lintel" so reports can still tell them apart even
+  // though they were entered together.
+  const rowsFor = (crew: z.infer<typeof crewSchema>, phase: "loading" | "unloading") => {
+    const common = {
+      date,
+      phase,
+      loadGroupId,
+      clientId: p.clientId || null,
+      tipperId: p.tipperId || null,
+      vehicleRequested: p.vehicleRequested?.trim() || null,
+    };
+
+    const brickRows = p.items.flatMap((item) => {
       const shares = distributeInt(item.brickCount, crew.workers.length);
       return crew.workers.map((w, i) =>
         prisma.loadingWork.create({
           data: {
-            date,
-            phase,
-            loadType: p.loadType,
-            loadGroupId,
+            ...common,
+            loadType: "brick",
             ...workerData(w.type, w.id),
-            // Lintel slabs aren't a brick size, so never attach one.
-            brickSizeId: p.loadType === "lintel" ? null : item.brickSizeId || null,
-            clientId: p.clientId || null,
-            tipperId: p.tipperId || null,
-            vehicleRequested: p.vehicleRequested?.trim() || null,
+            brickSizeId: item.brickSizeId || null,
             brickCount: shares[i],
             ratePerBrick: crew.ratePerBrick,
             totalAmount: shares[i] * crew.ratePerBrick,
@@ -229,6 +249,26 @@ export async function createLoadingWork(input: CreateInput) {
         })
       );
     });
+
+    if (p.slabCount <= 0) return brickRows;
+
+    const slabShares = distributeInt(p.slabCount, crew.workers.length);
+    const slabRows = crew.workers.map((w, i) =>
+      prisma.loadingWork.create({
+        data: {
+          ...common,
+          loadType: "lintel",
+          ...workerData(w.type, w.id),
+          // A slab is not a brick size, so never attach one.
+          brickSizeId: null,
+          brickCount: slabShares[i],
+          ratePerBrick: crew.ratePerSlab,
+          totalAmount: slabShares[i] * crew.ratePerSlab,
+        },
+      })
+    );
+    return [...brickRows, ...slabRows];
+  };
 
   const ops = [];
   if (p.loading) ops.push(...rowsFor(p.loading, "loading"));

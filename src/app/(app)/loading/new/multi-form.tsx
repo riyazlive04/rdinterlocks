@@ -9,10 +9,13 @@ import { distributeInt } from "@/lib/distribute";
 type WorkerType = "loader" | "operator" | "employee";
 type WorkerOption = { type: WorkerType; id: string; name: string };
 type Mode = "loading" | "unloading" | "both";
-type LoadType = "brick" | "lintel";
 type Dir = "in" | "out";
 
-type Crew = { workers: Array<{ type: WorkerType; id: string }>; ratePerBrick: number };
+type Crew = {
+  workers: Array<{ type: WorkerType; id: string }>;
+  ratePerBrick: number;
+  ratePerSlab: number;
+};
 type ClientOption = { id: string; name: string; location?: string };
 type TipperOption = { id: string; name: string; ownership: string };
 type VendorOption = { id: string; name: string };
@@ -27,10 +30,10 @@ type ChargeLine = {
 type SizeLine = { brickSizeId: string; brickCount: number };
 type Sub = {
   date: string;
-  loadType: LoadType;
   clientId?: string;
   vehicleRequested?: string;
   items: Array<{ brickSizeId?: string; brickCount: number }>;
+  slabCount: number;
   loading?: Crew;
   unloading?: Crew;
   tipperId?: string;
@@ -63,9 +66,8 @@ export function LoadingMultiForm({
   const keyOf = (w: WorkerOption) => `${w.type}:${w.id}`;
 
   const [date, setDate] = useState(formatISODate(new Date()));
-  const [loadType, setLoadType] = useState<LoadType>("brick");
   // One line per brick size on the trip, so a lorry carrying 6" AND 8" is a
-  // single entry instead of two.
+  // single entry instead of two. Lintel slabs ride along on the same entry.
   const [lines, setLines] = useState<SizeLine[]>([
     { brickSizeId: sizes[0]?.id ?? "", brickCount: 1000 },
   ]);
@@ -80,24 +82,22 @@ export function LoadingMultiForm({
   const [mode, setMode] = useState<Mode>("loading");
   const [loadSel, setLoadSel] = useState<Set<string>>(new Set());
   const [loadRate, setLoadRate] = useState<number>(0.5);
+  const [loadSlabRate, setLoadSlabRate] = useState<number>(0);
   const [unloadSel, setUnloadSel] = useState<Set<string>>(new Set());
   const [unloadRate, setUnloadRate] = useState<number>(0.5);
+  const [unloadSlabRate, setUnloadSlabRate] = useState<number>(0);
 
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-
-  const isLintel = loadType === "lintel";
-  const unit = isLintel ? "slabs" : "bricks";
-  const unitOne = isLintel ? "slab" : "brick";
 
   const showLoad = mode !== "unloading";
   const showUnload = mode !== "loading";
 
   // Every crew is paid on the whole trip, so the split tables and the salary
-  // work off the combined count across all size lines.
-  const brickCount = isLintel
-    ? slabCount
-    : lines.reduce((s, l) => s + (l.brickCount || 0), 0);
+  // work off the combined count across all size lines, plus the slabs.
+  const brickCount = lines.reduce((s, l) => s + (l.brickCount || 0), 0);
+  const hasSlabs = slabCount > 0;
+  const hasBricks = brickCount > 0;
 
   const addLine = () =>
     setLines((l) => [
@@ -196,35 +196,53 @@ export function LoadingMultiForm({
     );
   };
 
-  const splitTable = (sel: Set<string>, rate: number) => {
+  // Bricks and slabs are split across the crew separately, because they are
+  // paid at different rates, then added up per worker.
+  const crewTotal = (rate: number, slabRate: number) =>
+    Math.round(brickCount * (rate || 0) + slabCount * (slabRate || 0));
+
+  const splitTable = (sel: Set<string>, rate: number, slabRate: number) => {
     const sw = workersFor(sel);
     if (sw.length === 0) return null;
-    const split = distributeInt(brickCount || 0, sw.length);
-    const total = Math.round((brickCount || 0) * (rate || 0));
+    const bricksSplit = distributeInt(brickCount || 0, sw.length);
+    const slabsSplit = distributeInt(slabCount || 0, sw.length);
     return (
       <div className="mt-3 bg-slate-50 rounded-xl overflow-hidden">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="text-slate-500 text-[10px] uppercase tracking-wider">
               <th className="text-left px-3 py-2">Worker</th>
-              <th className="text-right px-3 py-2 capitalize">{unit}</th>
+              {hasBricks && <th className="text-right px-3 py-2">Bricks</th>}
+              {hasSlabs && <th className="text-right px-3 py-2">Slabs</th>}
               <th className="text-right px-3 py-2">Salary</th>
             </tr>
           </thead>
           <tbody>
-            {sw.map((w, i) => (
-              <tr key={keyOf(w)} className="border-t border-slate-200">
-                <td className="px-3 py-2 font-semibold text-ink">{w.name}</td>
-                <td className="px-3 py-2 text-right num">{formatNumber(split[i] ?? 0)}</td>
-                <td className="px-3 py-2 text-right num font-semibold">
-                  {formatINR(Math.round((split[i] ?? 0) * rate))}
-                </td>
-              </tr>
-            ))}
+            {sw.map((w, i) => {
+              const b = bricksSplit[i] ?? 0;
+              const s = slabsSplit[i] ?? 0;
+              return (
+                <tr key={keyOf(w)} className="border-t border-slate-200">
+                  <td className="px-3 py-2 font-semibold text-ink">{w.name}</td>
+                  {hasBricks && <td className="px-3 py-2 text-right num">{formatNumber(b)}</td>}
+                  {hasSlabs && <td className="px-3 py-2 text-right num">{formatNumber(s)}</td>}
+                  <td className="px-3 py-2 text-right num font-semibold">
+                    {formatINR(Math.round(b * (rate || 0) + s * (slabRate || 0)))}
+                  </td>
+                </tr>
+              );
+            })}
             <tr className="border-t-2 border-slate-300 bg-white">
               <td className="px-3 py-2 font-bold">Total</td>
-              <td className="px-3 py-2 text-right num font-bold">{formatNumber(brickCount || 0)}</td>
-              <td className="px-3 py-2 text-right num font-bold">{formatINR(total)}</td>
+              {hasBricks && (
+                <td className="px-3 py-2 text-right num font-bold">{formatNumber(brickCount)}</td>
+              )}
+              {hasSlabs && (
+                <td className="px-3 py-2 text-right num font-bold">{formatNumber(slabCount)}</td>
+              )}
+              <td className="px-3 py-2 text-right num font-bold">
+                {formatINR(crewTotal(rate, slabRate))}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -233,27 +251,36 @@ export function LoadingMultiForm({
   };
 
   const grandTotal = useMemo(() => {
-    const load = showLoad ? Math.round((brickCount || 0) * (loadRate || 0)) : 0;
-    const unload = showUnload ? Math.round((brickCount || 0) * (unloadRate || 0)) : 0;
+    const load = showLoad ? Math.round(brickCount * (loadRate || 0) + slabCount * (loadSlabRate || 0)) : 0;
+    const unload = showUnload
+      ? Math.round(brickCount * (unloadRate || 0) + slabCount * (unloadSlabRate || 0))
+      : 0;
     return load + unload;
-  }, [brickCount, loadRate, unloadRate, showLoad, showUnload]);
+  }, [brickCount, slabCount, loadRate, loadSlabRate, unloadRate, unloadSlabRate, showLoad, showUnload]);
 
   const submit = () => {
     setError(null);
-    if (brickCount <= 0) return setError(`${isLintel ? "Slab" : "Brick"} count must be more than 0`);
-    if (!isLintel) {
-      const filled = lines.filter((l) => l.brickCount > 0);
-      const seen = new Set<string>();
-      for (const l of filled) {
-        const key = l.brickSizeId || "mixed";
-        if (seen.has(key)) return setError("Each brick size can only be listed once");
-        seen.add(key);
-      }
+    if (brickCount <= 0 && slabCount <= 0) {
+      return setError("Enter the bricks, the lintel slabs, or both");
+    }
+    const seen = new Set<string>();
+    for (const l of lines.filter((x) => x.brickCount > 0)) {
+      const key = l.brickSizeId || "mixed";
+      if (seen.has(key)) return setError("Each brick size can only be listed once");
+      seen.add(key);
     }
     if (showLoad && loadSel.size === 0) return setError("Pick at least one person who loaded");
-    if (showLoad && loadRate <= 0) return setError("Loading rate must be more than 0");
+    if (showLoad && hasBricks && loadRate <= 0) return setError("Loading rate must be more than 0");
+    if (showLoad && hasSlabs && loadSlabRate <= 0) {
+      return setError("Enter the loading rate per slab");
+    }
     if (showUnload && unloadSel.size === 0) return setError("Pick at least one person who unloaded");
-    if (showUnload && unloadRate <= 0) return setError("Unloading rate must be more than 0");
+    if (showUnload && hasBricks && unloadRate <= 0) {
+      return setError("Unloading rate must be more than 0");
+    }
+    if (showUnload && hasSlabs && unloadSlabRate <= 0) {
+      return setError("Enter the unloading rate per slab");
+    }
     if (tipperId && tipperCharge < 0) return setError("Tipper charge can't be negative");
     for (const c of charges) {
       if (!c.name.trim()) return setError("Every charge needs a name (or remove the empty line)");
@@ -262,19 +289,25 @@ export function LoadingMultiForm({
       try {
         await onSubmit({
           date,
-          loadType,
           clientId: clientId || undefined,
           vehicleRequested: vehicleRequested.trim() || undefined,
-          items: isLintel
-            ? [{ brickCount: slabCount }]
-            : lines
-                .filter((l) => l.brickCount > 0)
-                .map((l) => ({ brickSizeId: l.brickSizeId || undefined, brickCount: l.brickCount })),
+          items: lines
+            .filter((l) => l.brickCount > 0)
+            .map((l) => ({ brickSizeId: l.brickSizeId || undefined, brickCount: l.brickCount })),
+          slabCount,
           loading: showLoad
-            ? { workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: loadRate }
+            ? {
+                workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })),
+                ratePerBrick: loadRate,
+                ratePerSlab: loadSlabRate,
+              }
             : undefined,
           unloading: showUnload
-            ? { workers: workersFor(unloadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: unloadRate }
+            ? {
+                workers: workersFor(unloadSel).map((w) => ({ type: w.type, id: w.id })),
+                ratePerBrick: unloadRate,
+                ratePerSlab: unloadSlabRate,
+              }
             : undefined,
           tipperId: tipperId || undefined,
           tipperCharge: tipperId ? tipperCharge : 0,
@@ -323,110 +356,102 @@ export function LoadingMultiForm({
         </div>
       )}
 
-      <Field label="What was handled">
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={() => setLoadType("brick")}
-            className={clsx(
-              "flex-1 px-3 py-2 rounded-lg text-[12px] font-semibold transition",
-              !isLintel ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
-            )}
-          >
-            Bricks
-          </button>
-          <button
-            type="button"
-            onClick={() => setLoadType("lintel")}
-            className={clsx(
-              "flex-1 px-3 py-2 rounded-lg text-[12px] font-semibold transition",
-              isLintel ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
-            )}
-          >
-            Lintel slabs
-          </button>
-        </div>
-      </Field>
-
-      <div className="grid sm:grid-cols-3 gap-3 mt-3">
+      <div className="grid sm:grid-cols-3 gap-3">
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        {isLintel && (
-          <Field label={`Total ${unit}`}>
-            <Input
-              type="number"
-              value={slabCount || ""}
-              onChange={(e) => setSlabCount(Number(e.target.value || 0))}
-            />
-          </Field>
-        )}
       </div>
 
-      {/* Size lines — one row per brick size on this trip (6" and 8" together) */}
-      {!isLintel && (
-        <div className="mt-4 pt-3 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
-              Bricks loaded
-            </div>
-            <button
-              type="button"
-              onClick={addLine}
-              className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
-            >
-              + Add another size
-            </button>
+      {/* What went on the lorry — brick sizes and lintel slabs, one entry */}
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
+            What went on the lorry
           </div>
-          <div className="space-y-2">
-            {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-end bg-slate-50 rounded-xl p-2.5">
-                <div className="col-span-6 sm:col-span-6">
-                  <Field label="Brick size">
-                    <Select
-                      value={l.brickSizeId}
-                      onChange={(e) => updateLine(i, { brickSizeId: e.target.value })}
-                    >
-                      <option value="">- mixed -</option>
-                      {sizes.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                </div>
-                <div className="col-span-4 sm:col-span-5">
-                  <Field label="Bricks">
-                    <Input
-                      type="number"
-                      value={l.brickCount || ""}
-                      onChange={(e) => updateLine(i, { brickCount: Number(e.target.value || 0) })}
-                    />
-                  </Field>
-                </div>
-                <div className="col-span-2 sm:col-span-1 flex justify-end">
-                  {lines.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeLine(i)}
-                      className="w-9 h-9 rounded-md hover:bg-slate-200 inline-flex items-center justify-center text-slate-500"
-                      title="Remove this size"
-                    >
-                      <Icon.Trash size={15} />
-                    </button>
-                  )}
-                </div>
+          <button
+            type="button"
+            onClick={addLine}
+            className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+          >
+            + Add another size
+          </button>
+        </div>
+        <div className="space-y-2">
+          {lines.map((l, i) => (
+            <div key={i} className="grid grid-cols-12 gap-2 items-end bg-slate-50 rounded-xl p-2.5">
+              <div className="col-span-6 sm:col-span-6">
+                <Field label="Brick size">
+                  <Select
+                    value={l.brickSizeId}
+                    onChange={(e) => updateLine(i, { brickSizeId: e.target.value })}
+                  >
+                    <option value="">- mixed -</option>
+                    {sizes.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
               </div>
-            ))}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1.5">
-            Total on this trip{" "}
-            <span className="num font-bold text-ink">{formatNumber(brickCount)}</span> bricks. Each
-            size is saved on its own so 6&quot; and 8&quot; stay separate in the reports.
+              <div className="col-span-4 sm:col-span-5">
+                <Field label="Bricks">
+                  <Input
+                    type="number"
+                    value={l.brickCount || ""}
+                    onChange={(e) => updateLine(i, { brickCount: Number(e.target.value || 0) })}
+                  />
+                </Field>
+              </div>
+              <div className="col-span-2 sm:col-span-1 flex justify-end">
+                {lines.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeLine(i)}
+                    className="w-9 h-9 rounded-md hover:bg-slate-200 inline-flex items-center justify-center text-slate-500"
+                    title="Remove this size"
+                  >
+                    <Icon.Trash size={15} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Lintel slabs travel with the bricks — same trip, same entry. */}
+          <div className="grid grid-cols-12 gap-2 items-end bg-amber-50 rounded-xl p-2.5 border border-amber-200">
+            <div className="col-span-6 sm:col-span-6">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-800 mb-1.5">
+                Lintel slabs
+              </div>
+              <div className="text-[11px] text-amber-800/80">
+                On the same lorry - leave 0 if none
+              </div>
+            </div>
+            <div className="col-span-6 sm:col-span-5">
+              <Field label="Slabs">
+                <Input
+                  type="number"
+                  value={slabCount || ""}
+                  onChange={(e) => setSlabCount(Number(e.target.value || 0))}
+                />
+              </Field>
+            </div>
           </div>
         </div>
-      )}
+        <div className="text-[11px] text-slate-500 mt-1.5">
+          This trip: <span className="num font-bold text-ink">{formatNumber(brickCount)}</span>{" "}
+          bricks
+          {hasSlabs && (
+            <>
+              {" "}
+              + <span className="num font-bold text-ink">{formatNumber(slabCount)}</span> slabs
+            </>
+          )}
+          . Each size and the slabs are saved separately, so the reports still show 6&quot;, 8&quot;
+          and slabs apart.
+        </div>
+      </div>
 
       <div className="grid sm:grid-cols-2 gap-3 mt-3">
         <Field label="Customer (optional)">
@@ -607,41 +632,69 @@ export function LoadingMultiForm({
 
       {showLoad && (
         <div className="mt-4 pt-3 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 gap-3">
             <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
               Loading · {loadSel.size} selected
             </div>
-            <div className="w-32">
-              <Field label={`Rate ₹/${unitOne}`}>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={loadRate}
-                  onChange={(e) => setLoadRate(Number(e.target.value || 0))}
-                />
-              </Field>
+            <div className="flex gap-2">
+              <div className="w-28">
+                <Field label="Rate ₹/brick">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={loadRate}
+                    onChange={(e) => setLoadRate(Number(e.target.value || 0))}
+                  />
+                </Field>
+              </div>
+              {hasSlabs && (
+                <div className="w-28">
+                  <Field label="Rate ₹/slab">
+                    <Input
+                      type="number"
+                      step="0.5"
+                      value={loadSlabRate || ""}
+                      onChange={(e) => setLoadSlabRate(Number(e.target.value || 0))}
+                    />
+                  </Field>
+                </div>
+              )}
             </div>
           </div>
           {groupSelector(loadSel, toggle(setLoadSel))}
-          {splitTable(loadSel, loadRate)}
+          {splitTable(loadSel, loadRate, loadSlabRate)}
         </div>
       )}
 
       {showUnload && (
         <div className="mt-4 pt-3 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 gap-3">
             <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
               Unloading · {unloadSel.size} selected
             </div>
-            <div className="w-32">
-              <Field label={`Rate ₹/${unitOne}`}>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={unloadRate}
-                  onChange={(e) => setUnloadRate(Number(e.target.value || 0))}
-                />
-              </Field>
+            <div className="flex gap-2">
+              <div className="w-28">
+                <Field label="Rate ₹/brick">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={unloadRate}
+                    onChange={(e) => setUnloadRate(Number(e.target.value || 0))}
+                  />
+                </Field>
+              </div>
+              {hasSlabs && (
+                <div className="w-28">
+                  <Field label="Rate ₹/slab">
+                    <Input
+                      type="number"
+                      step="0.5"
+                      value={unloadSlabRate || ""}
+                      onChange={(e) => setUnloadSlabRate(Number(e.target.value || 0))}
+                    />
+                  </Field>
+                </div>
+              )}
             </div>
           </div>
           {mode === "both" && (
@@ -650,7 +703,7 @@ export function LoadingMultiForm({
             </div>
           )}
           {groupSelector(unloadSel, toggle(setUnloadSel))}
-          {splitTable(unloadSel, unloadRate)}
+          {splitTable(unloadSel, unloadRate, unloadSlabRate)}
         </div>
       )}
 
