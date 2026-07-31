@@ -2,6 +2,7 @@ import * as React from "react";
 import clsx from "clsx";
 import Image from "next/image";
 import Link from "next/link";
+import { NumberField } from "./number-input";
 
 export function Avatar({
   name,
@@ -303,6 +304,9 @@ export const inputClass =
   "w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-[14px] text-ink focus:outline-none focus:ring-2 focus:ring-brand-red/30 focus:border-brand-red/50 disabled:bg-slate-50 disabled:cursor-not-allowed";
 
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  // Number inputs get a wrapper that shows an empty box for 0 (no stuck "0")
+  // and lets decimals type cleanly. See NumberField.
+  if (props.type === "number") return <NumberField {...props} />;
   return <input {...props} className={clsx(inputClass, props.className)} />;
 }
 

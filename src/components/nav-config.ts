@@ -13,6 +13,7 @@ export type NavItem = {
 
 export const primaryNav: NavItem[] = [
   { id: "home", label: "Dashboard", href: "/", icon: "Home" },
+  { id: "tasks", label: "Tasks", href: "/tasks", icon: "Flag", matches: ["/tasks"] },
   {
     id: "production",
     label: "Production",
@@ -138,7 +139,7 @@ export function isNavActive(item: NavItem, pathname: string) {
 }
 
 // Items always shown to any logged-in user (no specific area gate).
-const ALWAYS_VISIBLE = new Set(["home", "guide", "more"]);
+const ALWAYS_VISIBLE = new Set(["home", "tasks", "guide", "more"]);
 
 // Filter a nav list to what the user may access. Each operational item's id
 // doubles as its access-area key; "settings" is admin-only.

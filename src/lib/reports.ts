@@ -487,7 +487,7 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
             loader:
               (w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-") +
               (w.phase === "unloading" ? " · unload" : ""),
-            size: w.brickSize?.label ?? "Mixed",
+            size: w.loadType === "lintel" ? "Lintel slab" : w.brickSize?.label ?? "Mixed",
             // Unloading reuses the same bricks - count them once (on loading)
             // so the report's brick total isn't doubled.
             bricks: w.phase === "unloading" ? 0 : w.brickCount,

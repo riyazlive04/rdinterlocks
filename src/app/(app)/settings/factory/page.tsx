@@ -16,6 +16,7 @@ export default async function FactorySettingsPage() {
           phone: s?.phone ?? "",
           gstin: s?.gstin ?? "",
           cementBagsPer1000: s?.cementBagsPer1000 ?? 18,
+          materialBasis: s?.materialBasis ?? 1000,
           cashOpening: s?.cashOpening ?? 0,
           dryingDays: s?.dryingDays ?? 3,
           curingDays: s?.curingDays ?? 10,

@@ -14,10 +14,32 @@ model User {
   id          String   @id @default(cuid())
   name        String
   pinHash     String
-  role        String   @default("admin") // admin (full) | manager | staff
+  role        String   @default("admin") // admin (full) | manager | telecaller | staff
   active      Boolean  @default(true)
   permissions String[] @default([]) // area keys granted (ignored for admin)
   createdAt   DateTime @default(now())
+
+  assignedTasks Task[] @relation("TaskAssignee")
+  createdTasks  Task[] @relation("TaskCreator")
+}
+
+// A to-do the admin assigns to another user (manager / telecaller / staff).
+// The assignee sees it on their Tasks page and marks it done.
+model Task {
+  id           String    @id @default(cuid())
+  title        String
+  details      String?
+  assignedToId String
+  assignedTo   User      @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+  createdById  String?
+  createdBy    User?     @relation("TaskCreator", fields: [createdById], references: [id])
+  dueDate      DateTime?
+  status       String    @default("open") // open | done
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@index([assignedToId])
+  @@index([status])
 }
 
 // ─── Master data (admin-managed) ──────────────────────────────────────
@@ -30,6 +52,7 @@ model Settings {
   phone           String  @default("")
   gstin           String  @default("")
   cementBagsPer1000 Float @default(18) // recipe ratio, for material reconciliation
+  materialBasis   Int     @default(1000) // recipe quantities are "per this many bricks"
   cashOpening     Float   @default(0)
   weekStartDay    Int     @default(1) // 0 sun, 1 mon
   settlementDay   Int     @default(6) // 6 sat
@@ -215,6 +238,7 @@ model Vendor {
   tippers     Tipper[]
   expenses    Expense[]
   tipperLoads TipperLoad[]
+  loadingCharges LoadingCharge[]
 }
 
 model Tipper {
@@ -227,7 +251,8 @@ model Tipper {
   emiAmount Float    @default(0) // monthly EMI if own
   active    Boolean  @default(true)
 
-  loads     TipperLoad[]
+  loads        TipperLoad[]
+  loadingWorks LoadingWork[]
 }
 
 model Client {
@@ -242,6 +267,7 @@ model Client {
   orders Order[]
   payments ClientPayment[]
   loadingWorks LoadingWork[]
+  loadingCharges LoadingCharge[]
   leads Lead[]
 }
 
@@ -323,6 +349,9 @@ model Expense {
 model TipperLoad {
   id          String   @id @default(cuid())
   date        DateTime @default(now())
+  // Set when this load was auto-created from a loading entry, so the two stay
+  // linked for edits/deletes.
+  loadGroupId String?
   tipperId    String
   tipper      Tipper   @relation(fields: [tipperId], references: [id])
   vendorId    String?  // if vendor-owned
@@ -373,7 +402,12 @@ model LoadingWork {
   id           String   @id @default(cuid())
   date         DateTime @default(now())
   phase        String   @default("loading") // loading | unloading
+  loadType     String   @default("brick") // brick | lintel (lintel slabs)
   workerType   String   @default("loader") // loader | operator | employee
+  // One physical load splits into several rows (one per worker / phase). They
+  // share a loadGroupId so the tipper, add-on charges and cash entries can be
+  // attached to the load as a whole and edited/deleted together.
+  loadGroupId  String?
   loaderId     String?
   loader       Loader?   @relation(fields: [loaderId], references: [id])
   operatorId   String?
@@ -384,6 +418,8 @@ model LoadingWork {
   brickSize    BrickSize? @relation(fields: [brickSizeId], references: [id])
   clientId     String?
   client       Client?   @relation(fields: [clientId], references: [id])
+  tipperId     String?
+  tipper       Tipper?   @relation(fields: [tipperId], references: [id])
   vehicleRequested String?  // free text: what vehicle the customer asked for
   brickCount   Int
   ratePerBrick Float
@@ -391,6 +427,30 @@ model LoadingWork {
   notes        String?
 
   @@index([date])
+  @@index([loadGroupId])
+}
+
+// Extra products / services billed on a loading trip: shifting charge, lintel
+// slab, cement, etc. direction=in means we sold it to the customer (income);
+// direction=out means we bought it from a vendor (expense). Each line owns its
+// cash-book entry so editing/zeroing/deleting the load keeps accounts in step.
+model LoadingCharge {
+  id          String   @id @default(cuid())
+  loadGroupId String
+  date        DateTime @default(now())
+  clientId    String?
+  client      Client?  @relation(fields: [clientId], references: [id])
+  name        String
+  direction   String   @default("in") // in (income) | out (expense)
+  quantity    Float    @default(1)
+  unit        String   @default("unit")
+  amount      Float    // total for the line
+  vendorId    String?
+  vendor      Vendor?  @relation(fields: [vendorId], references: [id])
+  cashEntryId String?  @unique
+  cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
+
+  @@index([loadGroupId])
 }
 
 // ─── Sales: Order → Deliveries → Payments ─────────────────────────────
@@ -736,6 +796,7 @@ model CashEntry {
   clientPayment ClientPayment?
   employeePayout EmployeePayout?
   workerPayout  WorkerPayout?
+  loadingCharge LoadingCharge?
 
   @@index([date])
 }

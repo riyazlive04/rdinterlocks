@@ -151,6 +151,57 @@ export async function deleteMaterial(id: string) {
   revalidatePath("/settings/materials");
 }
 
+// ─── Material recipe (usage per basis bricks, per brick size) ──────────
+
+const recipeSchema = z.object({
+  brickSizeId: z.string().min(1),
+  materialId: z.string().min(1),
+  qtyPerBasis: z.number().nonnegative(),
+});
+
+export async function upsertRecipe(data: z.infer<typeof recipeSchema>) {
+  const p = recipeSchema.parse(data);
+  await prisma.materialRecipe.upsert({
+    where: { brickSizeId_materialId: { brickSizeId: p.brickSizeId, materialId: p.materialId } },
+    update: { qtyPer1000: p.qtyPerBasis },
+    create: { brickSizeId: p.brickSizeId, materialId: p.materialId, qtyPer1000: p.qtyPerBasis },
+  });
+  revalidatePath("/settings/materials");
+}
+
+// ─── Material stock on hand ───────────────────────────────────────────
+
+const stockSchema = z.object({
+  materialId: z.string().min(1),
+  quantity: z.number(),
+  reorderAt: z.number().nonnegative().default(0),
+});
+
+// Set the current stock level and reorder threshold outright.
+export async function setMaterialStock(data: z.infer<typeof stockSchema>) {
+  const p = stockSchema.parse(data);
+  await prisma.materialStock.upsert({
+    where: { materialId: p.materialId },
+    update: { quantity: p.quantity, reorderAt: p.reorderAt },
+    create: { materialId: p.materialId, quantity: p.quantity, reorderAt: p.reorderAt },
+  });
+  revalidatePath("/settings/material-stock");
+  revalidatePath("/");
+}
+
+// Add received stock to the current level (a delivery of raw material arrived).
+export async function addMaterialStock(materialId: string, amount: number) {
+  const amt = Number(amount);
+  if (!amt) return;
+  await prisma.materialStock.upsert({
+    where: { materialId },
+    update: { quantity: { increment: amt } },
+    create: { materialId, quantity: amt, reorderAt: 0 },
+  });
+  revalidatePath("/settings/material-stock");
+  revalidatePath("/");
+}
+
 // ─── People (operators / masons / loaders) ────────────────────────────
 
 const personSchema = z.object({ name: z.string().min(1), phone: z.string().optional() });
@@ -335,6 +386,7 @@ const settingsSchema = z.object({
   phone: z.string().default(""),
   gstin: z.string().default(""),
   cementBagsPer1000: z.number().nonnegative(),
+  materialBasis: z.number().int().positive().default(1000),
   cashOpening: z.number(),
   dryingDays: z.number().int().nonnegative().default(3),
   curingDays: z.number().int().nonnegative().default(10),
@@ -374,7 +426,7 @@ export async function changePassword(data: z.infer<typeof passwordSchema>) {
 
 // ─── Users & access (admin-managed) ───────────────────────────────────
 
-const roleEnum = z.enum(["admin", "manager", "staff"]);
+const roleEnum = z.enum(["admin", "manager", "telecaller", "staff"]);
 
 const userCreateSchema = z.object({
   name: z.string().min(1),
