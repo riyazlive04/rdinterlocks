@@ -52,3 +52,8 @@ export function orDash(v: string | number | null | undefined): string {
   if (v === null || v === undefined || v === "") return "—";
   return String(v);
 }
+
+// Full number wins when we have it; older calls only ever sent a masked one.
+export function displayPhone(lead: { phoneNumber: string; phoneMasked: string }): string {
+  return lead.phoneNumber || lead.phoneMasked || "";
+}

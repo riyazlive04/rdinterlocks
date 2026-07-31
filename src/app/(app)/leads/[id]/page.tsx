@@ -5,7 +5,7 @@ import { requireArea } from "@/lib/auth";
 import { Card, PageHeader, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatISODate, formatLongDate, formatNumber } from "@/lib/format";
-import { isFollowUpDue, orDash } from "@/lib/leads";
+import { displayPhone, isFollowUpDue, orDash } from "@/lib/leads";
 import { FollowUpControl, LeadStatusActions, StagePicker } from "./lead-controls";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -34,7 +34,11 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     <>
       <PageHeader
         title={lead.customerName || "Name not captured"}
-        sub={`Call ${lead.callId}`}
+        sub={
+          lead.callSequence > 1
+            ? `Call ${lead.callSequence} · latest ${lead.callId}`
+            : `Call ${lead.callId}`
+        }
         back="/leads"
         right={
           !locked ? (
@@ -75,7 +79,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             )}
           </div>
           <div className="text-[11px] text-emerald-800 mt-1">
-            This lead is now read-only. Further imports of call {lead.callId} are refused with 409
+            This lead is now read-only. Further imports for this contact are refused with 409
             rather than overwriting it.
           </div>
         </Card>
@@ -86,6 +90,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <div className="text-base font-bold text-ink mb-3">Enquiry</div>
           <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3">
             <Row label="Customer name" value={orDash(lead.customerName)} />
+            <Row label="Phone" value={orDash(displayPhone(lead))} />
             <Row label="Place" value={orDash(lead.place)} />
             <Row
               label="Type of bricks"

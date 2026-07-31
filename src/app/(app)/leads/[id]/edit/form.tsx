@@ -8,6 +8,7 @@ type Option = { id: string; label: string };
 
 export type LeadFormValues = {
   customerName: string;
+  phoneNumber: string;
   place: string;
   brickType: string;
   brickCount: number | null;
@@ -29,11 +30,13 @@ export function EditLeadForm({
   initial,
   brickSizes,
   constructionTypes,
+  phoneMasked,
 }: {
   id: string;
   initial: LeadFormValues;
   brickSizes: Option[];
   constructionTypes: Option[];
+  phoneMasked?: string;
 }) {
   const [v, setV] = useState<LeadFormValues>(initial);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +73,12 @@ export function EditLeadForm({
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Customer name">
           <Input value={v.customerName} onChange={(e) => set("customerName", e.target.value)} autoFocus />
+        </Field>
+        <Field
+          label="Phone"
+          hint={!v.phoneNumber && phoneMasked ? `Masked on record: ${phoneMasked}` : undefined}
+        >
+          <Input value={v.phoneNumber} onChange={(e) => set("phoneNumber", e.target.value)} />
         </Field>
         <Field label="Place">
           <Input value={v.place} onChange={(e) => set("place", e.target.value)} />

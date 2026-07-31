@@ -8,12 +8,16 @@ import { prisma } from "./db";
 // number, and may send a field we haven't modelled yet. Rejecting the request
 // would throw away the parts it DID get right, so instead we coerce what we
 // can, record what we couldn't, and only ever hard-fail on things that make
-// the record meaningless — a body that isn't an object, or a missing callId
-// (without it there is no idempotency key and every retry would duplicate).
+// the record meaningless — a body that isn't an object, or a missing
+// contactKey (without it there is no way to group repeat calls from the same
+// caller into one lead, and every call would fragment into its own).
 
 export type LeadFieldKey =
   | "callId"
+  | "contactKey"
   | "customerName"
+  | "phoneNumber"
+  | "phoneMasked"
   | "place"
   | "brickType"
   | "brickCount"
@@ -30,7 +34,24 @@ export type LeadFieldKey =
 // without needing separate entries. Order matters — first match wins.
 const FIELD_ALIASES: Record<LeadFieldKey, string[]> = {
   callId: ["callid", "calluuid", "recordingid", "conversationid", "sessionid", "id"],
-  customerName: ["customername", "clientname", "callername", "contactname", "customer", "name"],
+  // The idempotency + grouping key: one contact, however many calls. Falls
+  // back to whichever phone field is present so a Transcriber delivery that
+  // forgets contactKey still groups correctly, rather than hard-failing.
+  contactKey: ["contactkey", "contactid", "customerkey", "customerid", "phonekey"],
+  // "contactname" is checked first — it's the current field name. "customername"
+  // and the rest are accepted for older callers and older Transcriber payloads.
+  customerName: ["contactname", "customername", "clientname", "callername", "customer", "name"],
+  phoneNumber: [
+    "phonenumber",
+    "phone",
+    "mobilenumber",
+    "mobile",
+    "contactnumber",
+    "customerphone",
+    "callerphone",
+    "callernumber",
+  ],
+  phoneMasked: ["phonemasked", "maskedphone", "phonemask", "maskednumber", "maskedmobile"],
   place: ["place", "location", "city", "town", "area", "sitename", "site", "address"],
   brickType: ["typeofbricks", "bricktype", "bricksize", "brickspec", "product", "size"],
   brickCount: [
@@ -224,7 +245,10 @@ export function normalizeStage(v: unknown): string {
 
 export type NormalizedLead = {
   callId: string;
+  contactKey: string;
   customerName: string;
+  phoneNumber: string;
+  phoneMasked: string;
   place: string;
   brickType: string;
   brickCount: number | null;
@@ -317,9 +341,17 @@ export function normalizeLeadPayload(body: Record<string, unknown>): NormalizeRe
   };
 
   const brickCountRaw = numberField("brickCount");
+  const phoneNumber = coerceText(pick("phoneNumber"));
+  const phoneMasked = coerceText(pick("phoneMasked"));
+  // No explicit contactKey? Fall back to whichever phone we have — it's the
+  // same "one contact" identity the key is meant to capture.
+  const contactKey = coerceText(pick("contactKey")) || phoneNumber || phoneMasked;
   const values: NormalizedLead = {
     callId: coerceText(pick("callId")),
+    contactKey,
     customerName: coerceText(pick("customerName")),
+    phoneNumber,
+    phoneMasked,
     place: coerceText(pick("place")),
     brickType: coerceText(pick("brickType")),
     brickCount: brickCountRaw === null ? null : Math.round(brickCountRaw),
@@ -339,7 +371,11 @@ export function normalizeLeadPayload(body: Record<string, unknown>): NormalizeRe
   }
 
   const missingFields: LeadFieldKey[] = [];
+  // callId is no longer the idempotency key (contactKey is), so its absence is
+  // now just an advisory gap rather than a hard failure.
+  if (!values.callId) missingFields.push("callId");
   if (!values.customerName) missingFields.push("customerName");
+  if (!values.phoneNumber && !values.phoneMasked) missingFields.push("phoneNumber");
   if (!values.place) missingFields.push("place");
   if (!values.brickType) missingFields.push("brickType");
   if (values.brickCount === null) missingFields.push("brickCount");
@@ -391,8 +427,11 @@ export type ImportOutcome = "created" | "updated" | "conflict";
 // echoing the request back would make it look like they had been wiped.
 export type PersistedLead = {
   id: string;
+  contactKey: string;
   callId: string;
   customerName: string;
+  phoneNumber: string;
+  phoneMasked: string;
   place: string;
   brickType: string;
   brickCount: number | null;
@@ -402,6 +441,8 @@ export type PersistedLead = {
   notes: string;
   followUpDate: Date | null;
   quotationStage: string;
+  callSequence: number;
+  isFollowUp: boolean;
   status: string;
 };
 
@@ -410,7 +451,8 @@ export type ImportResult =
   | { outcome: "conflict"; message: string; lead: PersistedLead };
 
 /**
- * Idempotent create-or-update keyed on callId.
+ * Idempotent create-or-update keyed on contactKey — one contact, however many
+ * calls, is one lead.
  *
  * Merge rule on re-import: a field is overwritten only when the new payload
  * carries a non-empty value for it. A later, thinner extraction therefore
@@ -427,8 +469,11 @@ export async function importLead(
 
   const select = {
     id: true,
+    contactKey: true,
     callId: true,
     customerName: true,
+    phoneNumber: true,
+    phoneMasked: true,
     place: true,
     brickType: true,
     brickCount: true,
@@ -438,10 +483,23 @@ export async function importLead(
     notes: true,
     followUpDate: true,
     quotationStage: true,
+    callSequence: true,
+    isFollowUp: true,
     status: true,
   } as const;
 
-  const existing = await prisma.lead.findUnique({ where: { callId: values.callId } });
+  const existing = await prisma.lead.findUnique({ where: { contactKey: values.contactKey } });
+
+  // Was this exact call already recorded against any lead? A retried
+  // extraction re-sends the same callId and must not bump callSequence again —
+  // only a callId we haven't seen succeed before counts as another touchpoint.
+  // Absent a callId there's no way to prove a duplicate, so it's treated as
+  // NOT new (safer to under-count than to inflate the call count).
+  const priorCallSeen =
+    !!values.callId &&
+    (await prisma.leadImport.count({
+      where: { callId: values.callId, outcome: { in: ["created", "updated"] } },
+    })) > 0;
 
   if (existing) {
     // A converted lead has already become a client/order downstream. Silently
@@ -449,7 +507,7 @@ export async function importLead(
     if (existing.convertedAt) {
       return {
         outcome: "conflict",
-        message: `Lead for callId "${values.callId}" was already converted on ${existing.convertedAt.toISOString()} and can no longer be updated by import.`,
+        message: `Lead for contactKey "${values.contactKey}" was already converted on ${existing.convertedAt.toISOString()} and can no longer be updated by import.`,
         lead: await prisma.lead.findUniqueOrThrow({ where: { id: existing.id }, select }),
       };
     }
@@ -459,6 +517,8 @@ export async function importLead(
     const num = (next: number | null, prev: number | null) =>
       replace || next !== null ? next : prev;
 
+    const isNewCall = !!values.callId && !priorCallSeen;
+
     const mergedExtra = replace
       ? extra
       : { ...((existing.extra as Record<string, unknown> | null) ?? {}), ...extra };
@@ -466,7 +526,10 @@ export async function importLead(
     const updated = await prisma.lead.update({
       where: { id: existing.id },
       data: {
+        callId: text(values.callId, existing.callId),
         customerName: text(values.customerName, existing.customerName),
+        phoneNumber: text(values.phoneNumber, existing.phoneNumber),
+        phoneMasked: text(values.phoneMasked, existing.phoneMasked),
         place: text(values.place, existing.place),
         brickType: text(values.brickType, existing.brickType),
         brickCount: num(values.brickCount, existing.brickCount),
@@ -480,6 +543,8 @@ export async function importLead(
           replace || values.quotationStage !== "new"
             ? values.quotationStage
             : existing.quotationStage,
+        callSequence: isNewCall ? existing.callSequence + 1 : existing.callSequence,
+        isFollowUp: isNewCall ? true : existing.isFollowUp,
         brickSizeId: refs.brickSizeId ?? (replace ? null : existing.brickSizeId),
         constructionTypeId: refs.constructionTypeId ?? (replace ? null : existing.constructionTypeId),
         ...(hasExtra || replace ? { extra: mergedExtra as Prisma.InputJsonValue } : {}),
@@ -492,8 +557,11 @@ export async function importLead(
   try {
     const created = await prisma.lead.create({
       data: {
+        contactKey: values.contactKey,
         callId: values.callId,
         customerName: values.customerName,
+        phoneNumber: values.phoneNumber,
+        phoneMasked: values.phoneMasked,
         place: values.place,
         brickType: values.brickType,
         brickCount: values.brickCount,
@@ -503,6 +571,8 @@ export async function importLead(
         notes: values.notes,
         followUpDate: values.followUpDate,
         quotationStage: values.quotationStage,
+        callSequence: 1,
+        isFollowUp: false,
         brickSizeId: refs.brickSizeId,
         constructionTypeId: refs.constructionTypeId,
         ...(hasExtra ? { extra: extra as Prisma.InputJsonValue } : {}),
@@ -511,8 +581,8 @@ export async function importLead(
     });
     return { outcome: "created", lead: created };
   } catch (e) {
-    // Two identical callIds racing: the unique index is the arbiter, and the
-    // loser retries as an update so the request is still idempotent.
+    // Two identical contactKeys racing: the unique index is the arbiter, and
+    // the loser retries as an update so the request is still idempotent.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return importLead(values, extra, mode);
     }

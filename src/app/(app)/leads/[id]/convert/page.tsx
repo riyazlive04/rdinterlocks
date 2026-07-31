@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireArea } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
+import { displayPhone } from "@/lib/leads";
 import { ConvertLeadForm } from "./form";
 
 export default async function ConvertLeadPage({ params }: { params: Promise<{ id: string }> }) {
@@ -42,6 +43,7 @@ export default async function ConvertLeadPage({ params }: { params: Promise<{ id
         callId={lead.callId}
         defaults={{
           customerName: lead.customerName,
+          phone: displayPhone(lead),
           place: lead.place,
           brickSizeId: lead.brickSizeId ?? "",
           constructionTypeId: lead.constructionTypeId ?? "",

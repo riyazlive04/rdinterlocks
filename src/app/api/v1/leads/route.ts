@@ -20,7 +20,8 @@ import {
 // a child path, and a dynamic sibling would make a lead whose callId happens to
 // be "import" unreachable. Lookup is by query instead:
 //
-//   ?callId=CALL_001     exact match, the sender's usual case
+//   ?contactKey=+91...  exact match — the lead for this contact, all calls
+//   ?callId=CALL_001    exact match on the most recent call attributed to a lead
 //   ?stage=quoted        filter by quotation stage
 //   ?status=open         open | converted | discarded (default: all)
 //   ?due=1               follow-up due today or earlier
@@ -95,6 +96,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const sp = req.nextUrl.searchParams;
+    const contactKey = sp.get("contactKey")?.trim();
     const callId = sp.get("callId")?.trim();
     const stage = sp.get("stage")?.trim();
     const status = sp.get("status")?.trim();
@@ -107,6 +109,7 @@ export async function GET(req: NextRequest) {
     endOfToday.setHours(23, 59, 59, 999);
 
     const where = {
+      ...(contactKey ? { contactKey } : {}),
       ...(callId ? { callId } : {}),
       ...(stage ? { quotationStage: stage } : {}),
       ...(status ? { status } : {}),
@@ -122,8 +125,11 @@ export async function GET(req: NextRequest) {
         take: limit,
         select: {
           id: true,
+          contactKey: true,
           callId: true,
           customerName: true,
+          phoneNumber: true,
+          phoneMasked: true,
           place: true,
           brickType: true,
           brickCount: true,
@@ -133,6 +139,8 @@ export async function GET(req: NextRequest) {
           notes: true,
           followUpDate: true,
           quotationStage: true,
+          callSequence: true,
+          isFollowUp: true,
           status: true,
           extra: true,
           convertedAt: true,

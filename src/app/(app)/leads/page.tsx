@@ -5,7 +5,7 @@ import { Avatar, PageHeader, Pill, EmptyState, StatCard } from "@/components/ui"
 import { Icon } from "@/components/icons";
 import { Pagination } from "@/components/pagination";
 import { formatINR, formatNumber, formatShortDate, startOfDay } from "@/lib/format";
-import { STAGE_ORDER, isFollowUpDue, orDash, stageLabel, stageTone } from "@/lib/leads";
+import { STAGE_ORDER, displayPhone, isFollowUpDue, orDash, stageLabel, stageTone } from "@/lib/leads";
 
 const PAGE_SIZE = 40;
 
@@ -37,6 +37,8 @@ export default async function LeadsPage({
       ? {
           OR: [
             { customerName: { contains: q, mode: "insensitive" as const } },
+            { phoneNumber: { contains: q, mode: "insensitive" as const } },
+            { phoneMasked: { contains: q, mode: "insensitive" as const } },
             { place: { contains: q, mode: "insensitive" as const } },
             { callId: { contains: q, mode: "insensitive" as const } },
             { notes: { contains: q, mode: "insensitive" as const } },
@@ -134,7 +136,7 @@ export default async function LeadsPage({
           <input
             name="q"
             defaultValue={q}
-            placeholder="Search by name, place, call id or notes…"
+            placeholder="Search by name, phone, place, call id or notes…"
             className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white border border-slate-200 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand-red/30"
           />
         </div>
@@ -182,11 +184,13 @@ export default async function LeadsPage({
                       {l.customerName || <span className="text-slate-400">Name not captured</span>}
                     </span>
                     <Pill tone={stageTone(l.quotationStage)}>{stageLabel(l.quotationStage)}</Pill>
+                    {l.callSequence > 1 && <Pill tone="blue">Call {l.callSequence}</Pill>}
                     {l.status === "converted" && <Pill tone="success">Converted</Pill>}
                     {l.status === "discarded" && <Pill tone="slate">Discarded</Pill>}
                   </div>
                   <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                    {orDash(l.place)}
+                    {orDash(displayPhone(l))}
+                    {l.place ? ` · ${l.place}` : ""}
                     {l.brickCount ? ` · ${formatNumber(l.brickCount)} bricks` : ""}
                     {l.brickType ? ` · ${l.brickType}` : ""}
                     {l.constructionType ? ` · ${l.constructionType}` : ""}
