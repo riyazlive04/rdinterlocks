@@ -103,7 +103,11 @@ async function wireTipper(
   date: Date,
   client: { name: string; location: string | null } | null
 ) {
-  if (!p.tipperId || p.tipperCharge <= 0) return;
+  // A tipper that carried the load is recorded whether or not anything was
+  // charged for it. An own truck doing a free run is still a trip that has to
+  // show up against the customer and on the Tipper page; only the money side
+  // is skipped when the charge is zero.
+  if (!p.tipperId) return;
   const tipper = await prisma.tipper.findUnique({
     where: { id: p.tipperId },
     include: { vendor: true },
@@ -133,7 +137,7 @@ async function wireTipper(
       (bricks > 0 && p.slabCount > 0 ? ` (+ ${p.slabCount} lintel slabs)` : ""),
   };
 
-  if (own) {
+  if (own && p.tipperCharge > 0) {
     // Income side — owns the cash entry for the money actually received.
     await prisma.cashEntry.create({
       data: {
@@ -148,8 +152,12 @@ async function wireTipper(
       },
     });
   } else {
+    // Free run, or a rented truck whose rent is a payable — the trip is
+    // recorded on its own with no cash entry attached.
     await prisma.tipperLoad.create({ data: loadData });
   }
+
+  if (p.tipperCharge <= 0) return;
 
   // Expense side — same amount, booked against the tipper.
   await prisma.expense.create({
