@@ -15,6 +15,12 @@
 --
 -- Run: npx prisma db execute --schema prisma/schema.prisma --file prisma/sql/2026-07-31-catch-up.sql
 -- Then: npm run db:upgrade
+--
+-- Stop the app (or any dev server) first: ADD COLUMN needs an exclusive lock,
+-- and a live connection holding the table will make this time out.
+
+SET statement_timeout = '300s';
+SET lock_timeout = '30s';
 
 -- ── Tasks ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "Task" (
@@ -116,7 +122,12 @@ CREATE INDEX IF NOT EXISTS "VendorPayment_vendorId_idx" ON "VendorPayment"("vend
 ALTER TABLE "Expense" ADD COLUMN IF NOT EXISTS "loadGroupId" TEXT;
 CREATE INDEX IF NOT EXISTS "Expense_loadGroupId_idx" ON "Expense"("loadGroupId");
 
+-- Task predates this release on some installs, so the column has to be added
+-- rather than only declared in the CREATE TABLE above.
+ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "statusReason" TEXT;
+
 -- New rows land on the new vocabulary; db:upgrade moves the existing ones.
+ALTER TABLE "Task"  ALTER COLUMN "status" SET DEFAULT 'wip';
 ALTER TABLE "Order" ALTER COLUMN "status" SET DEFAULT 'active';
 
 -- ── Foreign keys, added once every table above exists ─────────────────

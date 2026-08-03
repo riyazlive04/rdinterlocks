@@ -212,6 +212,20 @@ npm run db:seed      # wipe + reseed sample data
 npm run db:studio    # open Prisma Studio (browse/edit data)
 ```
 
+### ⚠️ Never run `prisma db push` from a stale checkout
+
+`db push` makes the database match `schema.prisma` **exactly** — including
+dropping tables the schema doesn't mention. Pushing from a branch that predates
+a release silently deletes that release's tables. It has already happened once:
+a push from an older `main` dropped `Die`, `DieUsage` and `VendorPayment`, and
+`/die` and `/avm` returned a server error until they were recreated.
+
+Before any `db push`, make sure your branch is up to date with `main`. On a
+database with real data, prefer the SQL in `prisma/sql/` — it only ever adds.
+
+Stop the app before applying schema SQL: `ADD COLUMN` needs an exclusive lock,
+and a live connection sitting idle in a transaction will make it time out.
+
 ### Upgrading a live database
 
 `db:seed` wipes everything, so it is only for a fresh install. On a database with
