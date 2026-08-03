@@ -595,6 +595,9 @@ model Delivery {
   vehicleId   String? // optional Tipper used
   truckPlate  String?
   notes       String?
+  // Set when the delivery was written by a loading entry rather than typed on
+  // the client screen, so the two are edited and deleted together.
+  loadGroupId String?
   completedAt DateTime? // set when the owner marks the delivery done (evening check)
 
   items   DeliveryItem[]
@@ -602,6 +605,7 @@ model Delivery {
   returns DeliveryReturn[]
 
   @@index([date])
+  @@index([loadGroupId])
 }
 
 model DeliveryItem {
@@ -761,7 +765,7 @@ model Advance {
 // rejected. Whatever the extractor DID hear is never lost — the verbatim
 // payload of every request is kept in LeadImport.
 model Lead {
-  id     String @id @default(cuid())
+  id         String @id @default(cuid())
   // Idempotency + grouping key: one CONTACT (caller) = one lead, however many
   // times they call in. Replaces callId as the upsert key so a customer who
   // calls three times becomes one lead with callSequence 3, not three

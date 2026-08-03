@@ -17,6 +17,15 @@ type Crew = {
   ratePerSlab: number;
 };
 type ClientOption = { id: string; name: string; location?: string };
+type OrderOption = {
+  id: string;
+  clientId: string;
+  date: string;
+  ordered: number;
+  delivered: number;
+  pending: number;
+  sizes: string[];
+};
 type TipperOption = { id: string; name: string; ownership: string };
 type VendorOption = { id: string; name: string };
 type ChargeLine = {
@@ -34,6 +43,7 @@ type Sub = {
   vehicleRequested?: string;
   items: Array<{ brickSizeId?: string; brickCount: number }>;
   slabCount: number;
+  orderId?: string;
   loading?: Crew;
   unloading?: Crew;
   tipperId?: string;
@@ -51,6 +61,7 @@ export function LoadingMultiForm({
   workers,
   sizes,
   clients,
+  orders,
   tippers,
   vendors,
   onSubmit,
@@ -58,6 +69,7 @@ export function LoadingMultiForm({
   workers: { loaders: WorkerOption[]; operators: WorkerOption[]; employees: WorkerOption[] };
   sizes: Array<{ id: string; label: string }>;
   clients: ClientOption[];
+  orders: OrderOption[];
   tippers: TipperOption[];
   vendors: VendorOption[];
   onSubmit: (d: Sub) => Promise<void>;
@@ -73,6 +85,7 @@ export function LoadingMultiForm({
   ]);
   const [slabCount, setSlabCount] = useState<number>(0);
   const [clientId, setClientId] = useState<string>("");
+  const [orderId, setOrderId] = useState<string>("");
   const [vehicleRequested, setVehicleRequested] = useState<string>("");
 
   const [tipperId, setTipperId] = useState<string>("");
@@ -113,6 +126,9 @@ export function LoadingMultiForm({
 
   const tipper = tippers.find((t) => t.id === tipperId);
   const tipperIsOwn = tipper?.ownership === "own";
+
+  const clientOrders = orders.filter((o) => o.clientId === clientId);
+  const selectedOrder = orders.find((o) => o.id === orderId);
 
   const changeMode = (m: Mode) => {
     setMode(m);
@@ -295,6 +311,7 @@ export function LoadingMultiForm({
             .filter((l) => l.brickCount > 0)
             .map((l) => ({ brickSizeId: l.brickSizeId || undefined, brickCount: l.brickCount })),
           slabCount,
+          orderId: orderId || undefined,
           loading: showLoad
             ? {
                 workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })),
@@ -455,7 +472,17 @@ export function LoadingMultiForm({
 
       <div className="grid sm:grid-cols-2 gap-3 mt-3">
         <Field label="Customer (optional)">
-          <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+          <Select
+            value={clientId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setClientId(next);
+              // Pre-pick the order when the customer has exactly one open —
+              // the common case, and the office shouldn't have to think.
+              const theirs = orders.filter((o) => o.clientId === next);
+              setOrderId(theirs.length === 1 ? theirs[0].id : "");
+            }}
+          >
             <option value="">- none -</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
@@ -473,6 +500,56 @@ export function LoadingMultiForm({
           />
         </Field>
       </div>
+
+      {/* Deliver against an order — what makes the customer's balance move */}
+      {clientId && (
+        <div className="mt-3">
+          {clientOrders.length === 0 ? (
+            <div className="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2.5">
+              This customer has no open order, so these bricks are recorded as loading work only.
+            </div>
+          ) : (
+            <Field label="Deliver against order">
+              <Select value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+                <option value="">- don&apos;t record a delivery (wages only) -</option>
+                {clientOrders.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {new Date(o.date).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                    {o.sizes.length ? ` · ${Array.from(new Set(o.sizes)).join(", ")}` : ""} ·{" "}
+                    {formatNumber(o.pending)} of {formatNumber(o.ordered)} still to deliver
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          {selectedOrder && hasBricks && (
+            <div
+              className={clsx(
+                "text-[11px] mt-1.5 font-semibold",
+                brickCount > selectedOrder.pending ? "text-amber-700" : "text-emerald-700"
+              )}
+            >
+              {brickCount > selectedOrder.pending
+                ? `${formatNumber(brickCount)} bricks is more than the ${formatNumber(
+                    selectedOrder.pending
+                  )} still owed on this order - it will be over-delivered.`
+                : `${formatNumber(brickCount)} bricks will be booked as delivered. ${formatNumber(
+                    selectedOrder.pending - brickCount
+                  )} left after this.`}
+            </div>
+          )}
+          {selectedOrder && hasSlabs && (
+            <div className="text-[11px] mt-1 text-slate-500">
+              The {formatNumber(slabCount)} slabs stay as loading work - slabs are priced on the
+              order&apos;s own slab lines, not delivered as bricks.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Transport: tipper + shifting charge */}
       <div className="mt-4 pt-3 border-t border-slate-100">

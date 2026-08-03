@@ -7,6 +7,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { distributeInt } from "@/lib/distribute";
 import { categoryIdByName } from "@/lib/expense-category";
+import { applyStockDeltas, recomputeOrderStatus, stockDeltasFor } from "@/lib/delivery-sync";
 
 const workerType = z.enum(["loader", "operator", "employee"]);
 const loadType = z.enum(["brick", "lintel"]);
@@ -62,6 +63,9 @@ const createSchema = z
     items: z.array(itemSchema).default([]),
     slabCount: z.number().int().nonnegative().default(0),
     clientId: z.string().optional(),
+    // When the trip is against a customer's open order, the bricks that left
+    // the yard are booked as a Delivery on it. Blank = wages only.
+    orderId: z.string().optional(),
     vehicleRequested: z.string().optional(),
     loading: crewSchema.optional(),
     unloading: crewSchema.optional(),
@@ -176,6 +180,74 @@ async function wireTipper(
   });
 }
 
+// ── The bricks that left the yard, booked against the customer's order ─────
+//
+// Loading used to record only who was paid. That left the order saying nothing
+// had been delivered and the stock untouched, even though the lorry had gone.
+// When the entry names an order, each brick size line becomes a DeliveryItem on
+// it, priced from the matching order line so the customer's balance moves by
+// the amount actually agreed.
+//
+// Slabs are deliberately left out: they are priced per slab on the order's slab
+// lines, which DeliveryItem cannot represent. They still show as loaded and
+// still earn wages.
+async function wireDelivery(p: CreateParsed, loadGroupId: string, date: Date) {
+  if (!p.orderId || p.items.length === 0) return;
+
+  const order = await prisma.order.findUnique({
+    where: { id: p.orderId },
+    include: { items: true },
+  });
+  if (!order) return;
+  // Guard against a mis-picked order on someone else's customer.
+  if (p.clientId && order.clientId !== p.clientId) return;
+
+  // Price each size from the order's own line for that size. A size that isn't
+  // on the order (an extra the customer asked for on the day) falls back to the
+  // price matrix, and finally to zero rather than being dropped.
+  const priced = [];
+  for (const item of p.items) {
+    if (!item.brickSizeId) continue; // "mixed" can't be attributed to a line
+    const line = order.items.find((i) => i.brickSizeId === item.brickSizeId);
+    let constructionTypeId = line?.constructionTypeId ?? order.items[0]?.constructionTypeId;
+    let pricePerBrick = line?.pricePerBrick ?? 0;
+    if (!line && constructionTypeId) {
+      const matrix = await prisma.brickPrice.findUnique({
+        where: {
+          brickSizeId_constructionTypeId: {
+            brickSizeId: item.brickSizeId,
+            constructionTypeId,
+          },
+        },
+      });
+      pricePerBrick = matrix?.sellPrice ?? 0;
+    }
+    if (!constructionTypeId) continue; // order has no lines to attribute against
+    priced.push({
+      brickSizeId: item.brickSizeId,
+      constructionTypeId,
+      quantity: item.brickCount,
+      pricePerBrick,
+      total: item.brickCount * pricePerBrick,
+    });
+  }
+  if (priced.length === 0) return;
+
+  await prisma.delivery.create({
+    data: {
+      orderId: order.id,
+      date,
+      loadGroupId,
+      notes: "Auto from loading entry",
+      items: { create: priced },
+    },
+  });
+
+  // Same FIFO draw-down the client screen uses, so stock agrees either way.
+  await applyStockDeltas(stockDeltasFor(priced, []));
+  await recomputeOrderStatus(order.id);
+}
+
 // ── Auto-wiring: turn the tipper + charges on a load into Tipper loads,
 // expenses and cash-book entries, all tagged with the load's group id. ──────
 async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
@@ -184,6 +256,7 @@ async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
     : null;
 
   await wireTipper(p, loadGroupId, date, client);
+  await wireDelivery(p, loadGroupId, date);
 
   // Each add-on charge → its own cash entry (income or expense).
   for (const c of p.charges) {
@@ -291,6 +364,8 @@ export async function createLoadingWork(input: CreateInput) {
   revalidatePath("/expense");
   revalidatePath("/cash");
   revalidatePath("/clients");
+  revalidatePath("/deliveries");
+  revalidatePath("/");
   redirect("/loading");
 }
 
@@ -327,6 +402,22 @@ export async function updateLoadingWork(id: string, input: z.infer<typeof update
 // load group, along with their cash-book entries. Used when the last worker row
 // of a group is deleted, or directly from the loading list.
 async function deleteGroupExtras(loadGroupId: string) {
+  // Deliveries first: removing one has to put the bricks back into stock and
+  // re-open the order, exactly as deleting it from the client screen would.
+  const deliveries = await prisma.delivery.findMany({
+    where: { loadGroupId },
+    include: { items: true, returns: true },
+  });
+  for (const d of deliveries) {
+    await prisma.delivery.delete({ where: { id: d.id } });
+    const restore = new Map<string, number>();
+    for (const [sizeId, delta] of stockDeltasFor(d.items, d.returns)) {
+      restore.set(sizeId, -delta);
+    }
+    await applyStockDeltas(restore);
+    await recomputeOrderStatus(d.orderId);
+  }
+
   const tipperLoads = await prisma.tipperLoad.findMany({ where: { loadGroupId } });
   for (const tl of tipperLoads) {
     await prisma.tipperLoad.delete({ where: { id: tl.id } });
@@ -361,6 +452,8 @@ export async function deleteLoadingWork(id: string) {
   revalidatePath("/expense");
   revalidatePath("/cash");
   revalidatePath("/clients");
+  revalidatePath("/deliveries");
+  revalidatePath("/");
 }
 
 // Delete a single add-on charge (and its cash entry) — the "zero it out" path.
