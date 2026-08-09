@@ -247,11 +247,17 @@ export default async function ReportsPage({
           {/* Per-tab filters */}
           {kind !== "summary" && (
             <div className="flex flex-wrap gap-2 items-center pt-1">
-              {kind === "sales" && clients.length > 0 && (
+              {(kind === "sales" || kind === "loading") && clients.length > 0 && (
                 <FilterDropdown
-                  label="Client"
+                  label="Customer"
                   value={sp?.clientId}
-                  options={clients.map((c) => ({ value: c.id, label: c.name }))}
+                  options={[
+                    // Loading can be saved without a customer; this finds those.
+                    ...(kind === "loading"
+                      ? [{ value: "none", label: "(no customer set)" }]
+                      : []),
+                    ...clients.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
                   buildHref={(v) => buildUrl({ clientId: v })}
                 />
               )}

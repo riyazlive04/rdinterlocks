@@ -12,7 +12,7 @@ const PAGE_SIZE = 50;
 export default async function LoadingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; worker?: string; page?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; worker?: string; client?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const today = startOfDay();
@@ -31,16 +31,27 @@ export default async function LoadingPage({
           : { employeeId: wId }
       : {};
 
-  const [works, loaders, operators, employees] = await Promise.all([
+  // "none" lists the entries saved without a customer, so they can be found
+  // and fixed rather than quietly lost.
+  const clientWhere =
+    sp?.client === "none" ? { clientId: null } : sp?.client ? { clientId: sp.client } : {};
+
+  const [works, loaders, operators, employees, clients] = await Promise.all([
     prisma.loadingWork.findMany({
-      where: { date: { gte: from, lte: to }, ...workerWhere },
+      where: { date: { gte: from, lte: to }, ...workerWhere, ...clientWhere },
       include: { loader: true, operator: true, employee: true, brickSize: true, client: true, tipper: true },
       orderBy: { date: "desc" },
     }),
     prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    prisma.client.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
   ]);
+
+  // How many entries in this window never got a customer.
+  const missingCustomer = await prisma.loadingWork.count({
+    where: { date: { gte: from, lte: to }, clientId: null },
+  });
 
   const workerGroups = [
     { label: "Loaders", items: loaders.map((l) => ({ key: `loader:${l.id}`, name: l.name })) },
@@ -55,6 +66,14 @@ export default async function LoadingPage({
   const workerHref = (w?: string) => {
     const p = new URLSearchParams(keep);
     if (w) p.set("worker", w);
+    if (sp?.client) p.set("client", sp.client);
+    const s = p.toString();
+    return `/loading${s ? `?${s}` : ""}`;
+  };
+  const clientHref = (c?: string) => {
+    const p = new URLSearchParams(keep);
+    if (c) p.set("client", c);
+    if (sp?.worker) p.set("worker", sp.worker);
     const s = p.toString();
     return `/loading${s ? `?${s}` : ""}`;
   };
@@ -120,6 +139,47 @@ export default async function LoadingPage({
       </div>
 
       <DateRangeFilter from={formatISODate(from)} to={formatISODate(to)} />
+
+      {/* Customer filter — including the entries that never got one */}
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 w-24 shrink-0">
+          Customer
+        </span>
+        <Link
+          href={clientHref()}
+          className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${
+            !sp?.client ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
+          }`}
+        >
+          All
+        </Link>
+        {missingCustomer > 0 && (
+          <Link
+            href={clientHref("none")}
+            className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${
+              sp?.client === "none"
+                ? "bg-amber-600 text-white"
+                : "bg-amber-50 text-amber-800 border border-amber-300"
+            }`}
+            title="Entries saved without a customer"
+          >
+            No customer <span className="num opacity-80">{missingCustomer}</span>
+          </Link>
+        )}
+        {clients.map((c) => (
+          <Link
+            key={c.id}
+            href={clientHref(c.id)}
+            className={`px-3 py-1.5 rounded-full text-[12px] font-semibold ${
+              sp?.client === c.id
+                ? "bg-ink text-white"
+                : "bg-white text-slate-700 border border-slate-200"
+            }`}
+          >
+            {c.name}
+          </Link>
+        ))}
+      </div>
 
       <div className="mb-4 space-y-2">
         <Link

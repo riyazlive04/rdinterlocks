@@ -760,8 +760,24 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
 
     case "loading": {
       const rows = await prisma.loadingWork.findMany({
-        where: { date: dateRange },
-        include: { loader: true, operator: true, employee: true, brickSize: true },
+        where: {
+          date: dateRange,
+          // "none" asks for the entries nobody attributed to a customer —
+          // the ones worth chasing up.
+          ...(filter.clientId === "none"
+            ? { clientId: null }
+            : filter.clientId
+              ? { clientId: filter.clientId }
+              : {}),
+        },
+        include: {
+          loader: true,
+          operator: true,
+          employee: true,
+          brickSize: true,
+          client: true,
+          tipper: true,
+        },
       });
       const moneyKeys = ["total"];
       // Slabs travel with the bricks on one entry but are counted in their own
@@ -780,6 +796,8 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
               loader:
                 (w.loader?.name ?? w.operator?.name ?? w.employee?.name ?? "-") +
                 (w.phase === "unloading" ? " · unload" : ""),
+              client: w.client?.name ?? "(no customer)",
+              tipper: w.tipper?.name ?? "",
               size: isSlab ? "Lintel slab" : w.brickSize?.label ?? "Mixed",
               bricks: isSlab ? 0 : counted,
               slabs: isSlab ? counted : 0,
@@ -798,6 +816,8 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
         numberKeys,
         columns: [
           { key: "loader", header: "Worker", format: "text" },
+          { key: "client", header: "Customer", format: "text" },
+          { key: "tipper", header: "Tipper", format: "muted" },
           { key: "size", header: "Size", format: "muted" },
           { key: "bricks", header: "Bricks", format: "number", align: "right" },
           { key: "slabs", header: "Slabs", format: "number", align: "right" },

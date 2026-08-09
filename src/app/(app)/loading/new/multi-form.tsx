@@ -51,6 +51,10 @@ type Sub = {
   charges: ChargeLine[];
 };
 
+// Sentinel for "deliberately no customer", so a blank select can be told apart
+// from a field the user simply never touched.
+const INTERNAL = "__internal__";
+
 const CHARGE_PRESETS: Array<{ name: string; unit: string }> = [
   { name: "Shifting charges", unit: "trip" },
   { name: "Lintel Beam", unit: "pcs" },
@@ -285,6 +289,9 @@ export function LoadingMultiForm({
       if (seen.has(key)) return setError("Each brick size can only be listed once");
       seen.add(key);
     }
+    if (!clientId) {
+      return setError("Choose the customer, or pick 'No customer' if it was an internal move");
+    }
     if (showLoad && loadSel.size === 0) return setError("Pick at least one person who loaded");
     if (showLoad && hasBricks && loadRate <= 0) return setError("Loading rate must be more than 0");
     if (showLoad && hasSlabs && loadSlabRate <= 0) {
@@ -305,7 +312,7 @@ export function LoadingMultiForm({
       try {
         await onSubmit({
           date,
-          clientId: clientId || undefined,
+          clientId: clientId && clientId !== INTERNAL ? clientId : undefined,
           vehicleRequested: vehicleRequested.trim() || undefined,
           items: lines
             .filter((l) => l.brickCount > 0)
@@ -471,7 +478,10 @@ export function LoadingMultiForm({
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3 mt-3">
-        <Field label="Customer (optional)">
+        {/* Not optional any more: a blank customer used to be a silent skip,
+            which made loads impossible to trace back. Internal moves are still
+            allowed, but they have to be chosen on purpose. */}
+        <Field label="Customer">
           <Select
             value={clientId}
             onChange={(e) => {
@@ -483,7 +493,8 @@ export function LoadingMultiForm({
               setOrderId(theirs.length === 1 ? theirs[0].id : "");
             }}
           >
-            <option value="">- none -</option>
+            <option value="">- choose the customer -</option>
+            <option value={INTERNAL}>No customer (internal / yard move)</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.location ? `${c.name} — ${c.location}` : c.name}
@@ -502,7 +513,7 @@ export function LoadingMultiForm({
       </div>
 
       {/* Deliver against an order — what makes the customer's balance move */}
-      {clientId && (
+      {clientId && clientId !== INTERNAL && (
         <div className="mt-3">
           {clientOrders.length === 0 ? (
             <div className="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2.5">
