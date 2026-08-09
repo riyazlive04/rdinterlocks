@@ -23,6 +23,7 @@ const kinds: Array<{ k: ReportKind | "summary"; label: string }> = [
   { k: "loading", label: "Loading" },
   { k: "wages", label: "Salary (detail)" },
   { k: "salarysummary", label: "Salary weekly / monthly" },
+  { k: "stock", label: "Stock check" },
   { k: "cashbook", label: "Cashbook" },
 ];
 

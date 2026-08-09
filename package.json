@@ -12,7 +12,9 @@
     "db:upgrade": "tsx prisma/upgrade.ts",
     "db:studio": "prisma studio",
     "docs:flow": "node scripts/flow-diagram.mjs",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:stock-check": "tsx prisma/reconcile-stock.ts",
+    "db:prices": "tsx prisma/refresh-price-matrix.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

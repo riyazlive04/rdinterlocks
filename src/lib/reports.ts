@@ -12,6 +12,7 @@ export type ReportKind =
   | "loading"
   | "wages"
   | "salarysummary"
+  | "stock"
   | "cashbook";
 
 export type ReportFilter = {
@@ -709,6 +710,90 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
 
     case "salarysummary":
       return salarySummary(filter);
+
+    case "stock": {
+      // Does the yard figure hold up? For every size: what was produced (plus
+      // bricks that came back), what has been delivered, and what the app says
+      // is left. If "on hand" and "expected" disagree, something was recorded
+      // without drawing stock — most often a delivery entered before the
+      // draw-down existed. This is deliberately over the whole history, not the
+      // selected period: a stock balance is a running total, not a date range.
+      const [sizes, batches, delivered, returned] = await Promise.all([
+        prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
+        prisma.stockBatch.groupBy({
+          by: ["brickSizeId", "source"],
+          _sum: { count: true, remaining: true },
+        }),
+        prisma.deliveryItem.groupBy({ by: ["brickSizeId"], _sum: { quantity: true } }),
+        prisma.deliveryReturn.aggregate({ _sum: { brickCount: true } }),
+      ]);
+
+      const rows: LedgerRow[] = [];
+      const totals: Record<string, number> = {
+        produced: 0,
+        returned: 0,
+        delivered: 0,
+        expected: 0,
+        onHand: 0,
+        diff: 0,
+      };
+
+      for (const s of sizes) {
+        const mine = batches.filter((b) => b.brickSizeId === s.id);
+        const produced = mine
+          .filter((b) => b.source !== "return")
+          .reduce((x, b) => x + (b._sum.count ?? 0), 0);
+        const backIn = mine
+          .filter((b) => b.source === "return")
+          .reduce((x, b) => x + (b._sum.count ?? 0), 0);
+        const onHand = mine.reduce((x, b) => x + (b._sum.remaining ?? 0), 0);
+        const out = delivered.find((d) => d.brickSizeId === s.id)?._sum.quantity ?? 0;
+        const expected = produced + backIn - out;
+        const diff = onHand - expected;
+        if (produced === 0 && backIn === 0 && out === 0 && onHand === 0) continue;
+
+        totals.produced += produced;
+        totals.returned += backIn;
+        totals.delivered += out;
+        totals.expected += expected;
+        totals.onHand += onHand;
+        totals.diff += diff;
+
+        rows.push({
+          id: s.id,
+          emphasis: diff === 0 ? "default" : "debit",
+          cells: {
+            size: s.label,
+            produced,
+            returned: backIn,
+            delivered: out,
+            expected,
+            onHand,
+            diff,
+            verdict: diff === 0 ? "agrees" : diff > 0 ? "on hand is higher" : "on hand is lower",
+          },
+        });
+      }
+
+      return {
+        title: "Stock check",
+        unit: "sizes",
+        numberKeys: ["produced", "returned", "delivered", "expected", "onHand", "diff"],
+        subtotalLabel: "Total",
+        columns: [
+          { key: "size", header: "Size", format: "text", width: "70px" },
+          { key: "produced", header: "Produced", format: "number", align: "right" },
+          { key: "returned", header: "Came back", format: "number", align: "right" },
+          { key: "delivered", header: "Delivered", format: "number", align: "right" },
+          { key: "expected", header: "Should be left", format: "number", align: "right" },
+          { key: "onHand", header: "App says", format: "number", align: "right" },
+          { key: "diff", header: "Difference", format: "number", align: "right" },
+          { key: "verdict", header: "", format: "muted" },
+        ],
+        sections: [{ dateKey: "all", dateLabel: "Every size, whole history", rows, subtotals: totals }],
+        totals,
+      };
+    }
 
     case "mason": {
       const settings = await prisma.settings.findUnique({ where: { id: "default" } });
