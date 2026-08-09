@@ -177,7 +177,7 @@ export function OrderForm({
           Bricks
         </div>
         {items.length === 0 ? (
-          <div className="text-[12px] text-slate-400 mb-1">No brick items - add one below or use lintel slabs only.</div>
+          <div className="text-[12px] text-slate-400 mb-1">No brick items - add one below or use lintel beams only.</div>
         ) : (
           <div className="space-y-3">
             {items.map((it, i) => (
@@ -248,10 +248,10 @@ export function OrderForm({
 
       <Card>
         <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-          Lintel slabs
+          Lintel beams
         </div>
         {slabItems.length === 0 ? (
-          <div className="text-[12px] text-slate-400 mb-1">No lintel slabs on this order.</div>
+          <div className="text-[12px] text-slate-400 mb-1">No lintel beams on this order.</div>
         ) : (
           <div className="space-y-3">
             {slabItems.map((it, i) => (
@@ -301,7 +301,7 @@ export function OrderForm({
         )}
         {slabSizes.length === 0 ? (
           <div className="mt-2 text-[12px] text-slate-500">
-            Add lintel slab sizes in Settings → Lintel slab sizes first.
+            Add lintel beam sizes in Settings → Lintel beam sizes first.
           </div>
         ) : (
           <button
@@ -309,7 +309,7 @@ export function OrderForm({
             onClick={addSlab}
             className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 text-[12px] font-semibold"
           >
-            <Icon.Plus size={14} /> Add lintel slab
+            <Icon.Plus size={14} /> Add lintel beam
           </button>
         )}
       </Card>

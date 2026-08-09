@@ -218,7 +218,7 @@ export function DeliveryForm({
 
       <Card>
         <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-          Add-on products (cement, lintel slab, loading charges, etc.)
+          Add-on products (cement, lintel beam, loading charges, etc.)
         </div>
         {addOns.length === 0 ? (
           <div className="text-[12px] text-slate-500">No add-ons.</div>

@@ -8,8 +8,8 @@ export default async function SlabSizesPage() {
   return (
     <>
       <PageHeader
-        title="Lintel slab sizes"
-        sub="Sizes offered for lintel slabs (e.g. 4, 5, 6) - used on client orders"
+        title="Lintel beam sizes"
+        sub="Sizes offered for lintel beams (e.g. 4, 5, 6) - used on client orders"
         back="/settings"
       />
       <MasterList
@@ -35,7 +35,7 @@ export default async function SlabSizesPage() {
           await deleteSlabSize(id);
         }}
         addLabel="Add size"
-        emptyText="No lintel slab sizes yet. Add 4, 5, 6 to get started."
+        emptyText="No lintel beam sizes yet. Add 4, 5, 6 to get started."
       />
     </>
   );

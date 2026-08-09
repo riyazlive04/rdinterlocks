@@ -83,7 +83,7 @@ export function LoadingMultiForm({
 
   const [date, setDate] = useState(formatISODate(new Date()));
   // One line per brick size on the trip, so a lorry carrying 6" AND 8" is a
-  // single entry instead of two. Lintel slabs ride along on the same entry.
+  // single entry instead of two. Lintel beams ride along on the same entry.
   const [lines, setLines] = useState<SizeLine[]>([
     { brickSizeId: sizes[0]?.id ?? "", brickCount: 1000 },
   ]);
@@ -281,7 +281,7 @@ export function LoadingMultiForm({
   const submit = () => {
     setError(null);
     if (brickCount <= 0 && slabCount <= 0) {
-      return setError("Enter the bricks, the lintel slabs, or both");
+      return setError("Enter the bricks, the lintel beams, or both");
     }
     const seen = new Set<string>();
     for (const l of lines.filter((x) => x.brickCount > 0)) {
@@ -386,7 +386,7 @@ export function LoadingMultiForm({
         </Field>
       </div>
 
-      {/* What went on the lorry — brick sizes and lintel slabs, one entry */}
+      {/* What went on the lorry — brick sizes and lintel beams, one entry */}
       <div className="mt-4 pt-3 border-t border-slate-100">
         <div className="flex items-center justify-between mb-2">
           <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
@@ -442,11 +442,11 @@ export function LoadingMultiForm({
             </div>
           ))}
 
-          {/* Lintel slabs travel with the bricks — same trip, same entry. */}
+          {/* Lintel beams travel with the bricks — same trip, same entry. */}
           <div className="grid grid-cols-12 gap-2 items-end bg-amber-50 rounded-xl p-2.5 border border-amber-200">
             <div className="col-span-6 sm:col-span-6">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-800 mb-1.5">
-                Lintel slabs
+                Lintel beams
               </div>
               <div className="text-[11px] text-amber-800/80">
                 On the same lorry - leave 0 if none
@@ -607,7 +607,7 @@ export function LoadingMultiForm({
         )}
       </div>
 
-      {/* Add-on charges (shifting extras, lintel slab, cement, custom) */}
+      {/* Add-on charges (shifting extras, lintel beam, cement, custom) */}
       <div className="mt-4 pt-3 border-t border-slate-100">
         <div className="flex items-center justify-between mb-2">
           <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
@@ -636,7 +636,7 @@ export function LoadingMultiForm({
 
         {charges.length === 0 ? (
           <div className="text-[12px] text-slate-500">
-            No extra charges. Add shifting, lintel slab, cement, etc. — mark each as sold to the
+            No extra charges. Add shifting, lintel beam, cement, etc. — mark each as sold to the
             customer (income) or bought from a vendor (expense).
           </div>
         ) : (

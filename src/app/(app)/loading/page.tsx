@@ -112,7 +112,7 @@ export default async function LoadingPage({
         </Card>
         <Card padding="tight">
           <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-            Lintel slabs
+            Lintel beams
           </div>
           <div className="num display text-xl font-bold mt-0.5">
             {formatNumber(
@@ -258,7 +258,7 @@ export default async function LoadingPage({
                         {w.phase === "unloading" ? "Unloading" : "Loading"}
                       </Pill>
                     </Td>
-                    <Td>{w.loadType === "lintel" ? "Lintel slab" : w.brickSize?.label ?? "-"}</Td>
+                    <Td>{w.loadType === "lintel" ? "Lintel beam" : w.brickSize?.label ?? "-"}</Td>
                     <Td align="right" className="num">{formatNumber(w.brickCount)}</Td>
                     <Td align="right" className="num">₹{w.ratePerBrick}</Td>
                     <Td align="right" className="num font-bold">{formatINR(w.totalAmount)}</Td>

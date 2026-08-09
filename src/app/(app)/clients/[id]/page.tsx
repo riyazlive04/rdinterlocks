@@ -256,7 +256,7 @@ export default async function ClientDetailPage({
                       {o.slabItems.map((it) => (
                         <div key={it.id} className="flex justify-between">
                           <span>
-                            Lintel slab {it.slabSize.label} · {formatNumber(it.quantity)} slabs
+                            Lintel beam {it.slabSize.label} · {formatNumber(it.quantity)} beams
                             {it.pricePerSlab > 0 ? ` @ ₹${it.pricePerSlab}` : ""}
                           </span>
                           <span className="num font-semibold">{formatINR(it.total)}</span>

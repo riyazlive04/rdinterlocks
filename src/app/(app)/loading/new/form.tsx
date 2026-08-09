@@ -136,7 +136,7 @@ export function LoadingForm({
                 isLintel ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
               )}
             >
-              Lintel slabs
+              Lintel beams
             </button>
           </div>
         </Field>

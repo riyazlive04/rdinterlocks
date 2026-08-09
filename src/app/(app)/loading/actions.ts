@@ -42,7 +42,7 @@ const itemSchema = z.object({
   brickCount: z.number().int().positive(),
 });
 
-// Lintel slabs ride on the same lorry as the bricks, so they are part of the
+// Lintel beams ride on the same lorry as the bricks, so they are part of the
 // same entry rather than a separate one — just their own count, paid at their
 // own rate because a slab is nothing like a brick to lift.
 
@@ -130,7 +130,7 @@ async function wireTipper(
     vendorId: tipper.vendorId,
     loadType: bricks > 0 ? "bricks" : "material",
     brickSizeId: sizeId,
-    materialName: bricks === 0 && p.slabCount > 0 ? "Lintel slabs" : null,
+    materialName: bricks === 0 && p.slabCount > 0 ? "Lintel beams" : null,
     quantity: bricks > 0 ? bricks : p.slabCount,
     unit: "pcs",
     toLocation: client?.location ?? null,
@@ -138,7 +138,7 @@ async function wireTipper(
     rentDirection: own ? "in" : "out",
     notes:
       "Auto from loading entry" +
-      (bricks > 0 && p.slabCount > 0 ? ` (+ ${p.slabCount} lintel slabs)` : ""),
+      (bricks > 0 && p.slabCount > 0 ? ` (+ ${p.slabCount} lintel beams)` : ""),
   };
 
   if (own && p.tipperCharge > 0) {
@@ -258,24 +258,32 @@ async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
   await wireTipper(p, loadGroupId, date, client);
   await wireDelivery(p, loadGroupId, date);
 
-  // Each add-on charge → its own cash entry (income or expense).
+  // Every add-on charge (shifting, lintel beam, cement, custom) becomes real
+  // money, both ways round:
+  //
+  //   sold to the customer  → cash IN, and it shows against them on the client
+  //                           page as a loading charge
+  //   bought from a vendor  → cash OUT **and an Expense row** under a category
+  //                           named after the charge, so it appears in the
+  //                           Expense screen and report and not only in the
+  //                           cash book
   for (const c of p.charges) {
     if (c.amount <= 0) continue;
+    const out = c.direction === "out";
     const vendor =
-      c.direction === "out" && c.vendorId
-        ? await prisma.vendor.findUnique({ where: { id: c.vendorId } })
-        : null;
+      out && c.vendorId ? await prisma.vendor.findUnique({ where: { id: c.vendorId } }) : null;
+    const title = out
+      ? `${c.name}${vendor ? ` - ${vendor.name}` : ""}`
+      : `${c.name}${client ? ` - ${client.name}` : ""}`;
+
     await prisma.cashEntry.create({
       data: {
         date,
         amount: c.amount,
         direction: c.direction,
-        source: c.direction === "in" ? "sale" : "expense",
+        source: out ? "expense" : "sale",
         category: c.name,
-        title:
-          c.direction === "in"
-            ? `${c.name}${client ? ` - ${client.name}` : ""}`
-            : `${c.name}${vendor ? ` - ${vendor.name}` : ""}`,
+        title,
         method: p.method,
         loadingCharge: {
           create: {
@@ -287,9 +295,26 @@ async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
             quantity: c.quantity,
             unit: c.unit,
             amount: c.amount,
-            vendorId: c.direction === "out" ? c.vendorId || null : null,
+            vendorId: out ? c.vendorId || null : null,
           },
         },
+        // The expense hangs off the same cash entry, so the rupee is counted
+        // once and deleting the load takes both away together.
+        ...(out
+          ? {
+              expense: {
+                create: {
+                  date,
+                  categoryId: await categoryIdByName(c.name),
+                  title,
+                  amount: c.amount,
+                  vendorId: c.vendorId || null,
+                  loadGroupId,
+                  notes: `${c.quantity} ${c.unit} - bought on a loading trip`,
+                },
+              },
+            }
+          : {}),
       },
     });
   }
