@@ -173,11 +173,15 @@ async function bill(loadGroupId: string, rate: number, typeName?: string) {
   });
   if (!order) throw new Error("Order was not created");
 
-  // Attach what the customer already paid, oldest first, up to the order value.
+  // Attach what the customer already paid. Biggest first, and only where the
+  // payment still fits inside what this order is worth: a customer with two
+  // loads has paid for both, and taking payments in date order would dump the
+  // lot on whichever was billed first and leave the other looking unpaid.
   let left = value;
   let attached = 0;
-  for (const pay of unallocated) {
+  for (const pay of [...unallocated].sort((a, b) => b.amount - a.amount)) {
     if (left <= 0) break;
+    if (pay.amount > left) continue; // belongs to another load
     await prisma.clientPayment.update({ where: { id: pay.id }, data: { orderId: order.id } });
     left -= pay.amount;
     attached++;

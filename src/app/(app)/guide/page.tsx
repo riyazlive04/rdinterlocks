@@ -9,6 +9,16 @@ const quickRef: Array<{
   output: Array<{ label: string; href: string }>;
 }> = [
   {
+    action: "Sales register (the notebook)",
+    enter: "Sales register → Add row",
+    enterHref: "/clients/register",
+    output: [
+      { label: "Sales register", href: "/clients/register" },
+      { label: "Client detail", href: "/clients" },
+      { label: "Cashbook (advance)", href: "/cash" },
+    ],
+  },
+  {
     action: "Daily production",
     enter: "Production → New entry",
     enterHref: "/production/new",
@@ -71,13 +81,62 @@ const quickRef: Array<{
     ],
   },
   {
-    action: "Loading work",
+    action: "Loading / unloading",
     enter: "Loading → New entry",
     enterHref: "/loading/new",
     output: [
       { label: "Loading list", href: "/loading" },
       { label: "Reports → Loading", href: "/reports?kind=loading" },
+      { label: "Tipper (the trip)", href: "/tipper" },
+      { label: "Client detail (loaded for)", href: "/clients" },
+      { label: "Deliveries (if an order was picked)", href: "/deliveries" },
+      { label: "Cashbook + Expense (charges)", href: "/cash" },
     ],
+  },
+  {
+    action: "Bill a load that already went out",
+    enter: "Sales register → amber panel → Bill it",
+    enterHref: "/clients/register",
+    output: [
+      { label: "Sales register", href: "/clients/register" },
+      { label: "Deliveries log", href: "/deliveries" },
+      { label: "Reports → Stock check", href: "/reports?kind=stock" },
+    ],
+  },
+  {
+    action: "New die (mould)",
+    enter: "Dies → New die",
+    enterHref: "/die",
+    output: [
+      { label: "Dies", href: "/die" },
+      { label: "Reports → Dies", href: "/reports?kind=die" },
+      { label: "Expense + Cashbook", href: "/expense" },
+    ],
+  },
+  {
+    action: "Turn a die over",
+    enter: "Dies → Change to side 2",
+    enterHref: "/die",
+    output: [
+      { label: "Dies", href: "/die" },
+      { label: "Reports → Dies", href: "/reports?kind=die" },
+    ],
+  },
+  {
+    action: "Pay AVM (advance / tipper due)",
+    enter: "AVM → Record payment",
+    enterHref: "/avm",
+    output: [
+      { label: "AVM advance & rent", href: "/avm" },
+      { label: "Reports → AVM", href: "/reports?kind=avm" },
+      { label: "Cashbook + Expense", href: "/cash" },
+    ],
+  },
+  {
+    action: "Check the yard adds up",
+    enter: "Reports → Stock check",
+    enterHref: "/reports?kind=stock",
+    output: [{ label: "Reports → Stock check", href: "/reports?kind=stock" }],
   },
   {
     action: "Worker advance",
