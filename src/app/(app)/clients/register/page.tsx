@@ -119,6 +119,57 @@ export default async function RegisterPage({
   const priceFor: Record<string, number> = {};
   for (const p of prices) priceFor[`${p.brickSizeId}:${p.constructionTypeId}`] = p.sellPrice;
 
+  // Bricks that went out on a loading trip for a named customer but were never
+  // billed — no order, so nothing in this register. These are the sales most
+  // easily lost, so they get their own tab with everything but the rate filled
+  // in already.
+  const loadedRows = await prisma.loadingWork.findMany({
+    where: { clientId: { not: null }, phase: { not: "unloading" }, loadType: "brick" },
+    include: { client: true, brickSize: true },
+    orderBy: { date: "desc" },
+  });
+  const billedGroups = new Set(
+    (
+      await prisma.delivery.findMany({
+        where: { loadGroupId: { not: null } },
+        select: { loadGroupId: true },
+      })
+    ).map((d) => d.loadGroupId)
+  );
+
+  const unbilledMap = new Map<
+    string,
+    {
+      loadGroupId: string;
+      date: string;
+      clientId: string;
+      clientName: string;
+      phone: string;
+      location: string;
+      brickSizeId: string;
+      sizeLabel: string;
+      bricks: number;
+    }
+  >();
+  for (const r of loadedRows) {
+    const key = r.loadGroupId ?? r.id;
+    if (billedGroups.has(key)) continue;
+    const g = unbilledMap.get(key) ?? {
+      loadGroupId: key,
+      date: formatISODate(r.date),
+      clientId: r.clientId!,
+      clientName: r.client!.name,
+      phone: r.client!.phone ?? "",
+      location: r.client!.location ?? "",
+      brickSizeId: r.brickSizeId ?? "",
+      sizeLabel: r.brickSize?.label ?? "mixed",
+      bricks: 0,
+    };
+    g.bricks += r.brickCount;
+    unbilledMap.set(key, g);
+  }
+  const unbilled = [...unbilledMap.values()];
+
   const href = (overrides: Record<string, string | undefined>) => {
     const u = new URLSearchParams();
     const merged: Record<string, string | undefined> = { status, q: q || undefined, ...overrides };
@@ -182,6 +233,7 @@ export default async function RegisterPage({
       <RegisterView
         rows={pageRows}
         status={status}
+        unbilled={unbilled}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
         types={types.map((t) => ({ id: t.id, label: t.name }))}
         priceFor={priceFor}

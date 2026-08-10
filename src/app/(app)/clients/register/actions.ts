@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { deriveOrderStatus } from "@/lib/order-status";
+import { applyStockDeltas, recomputeOrderStatus, stockDeltasFor } from "@/lib/delivery-sync";
 
 // The register is the paper book turned into one screen: a whole enquiry —
 // customer, what they want, the rate, the money — is one row. This action
@@ -24,6 +25,10 @@ const rowSchema = z.object({
   notes: z.string().optional(),
   // Existing customer picked from the list; blank means "match or create".
   clientId: z.string().optional(),
+  // Set when the row is being written to bill a loading trip that already
+  // happened. The bricks are then booked as delivered against the new order
+  // and drawn from stock, so the load stops showing as unbilled.
+  fromLoadGroupId: z.string().optional(),
 });
 
 export type RegisterRowInput = z.input<typeof rowSchema>;
@@ -126,9 +131,52 @@ export async function createRegisterRow(input: RegisterRowInput) {
     });
   }
 
+  // Billing a trip that already went out: book the bricks that were loaded as
+  // delivered on this new order, and draw them from stock — the same thing a
+  // loading entry does when an order was picked at the time.
+  if (p.fromLoadGroupId) {
+    const already = await prisma.delivery.count({
+      where: { loadGroupId: p.fromLoadGroupId },
+    });
+    const rows = await prisma.loadingWork.findMany({
+      where: { loadGroupId: p.fromLoadGroupId, phase: { not: "unloading" }, loadType: "brick" },
+    });
+    if (already === 0 && rows.length > 0) {
+      const perSize = new Map<string, number>();
+      for (const r of rows) {
+        if (!r.brickSizeId) continue;
+        perSize.set(r.brickSizeId, (perSize.get(r.brickSizeId) ?? 0) + r.brickCount);
+      }
+      const items = [...perSize.entries()].map(([brickSizeId, quantity]) => ({
+        brickSizeId,
+        constructionTypeId: p.constructionTypeId,
+        quantity,
+        // The rate just agreed on this row applies to the size it was for;
+        // any other size on the trip is billed at the same rate rather than
+        // silently at zero.
+        pricePerBrick: p.pricePerBrick,
+        total: quantity * p.pricePerBrick,
+      }));
+      if (items.length > 0) {
+        await prisma.delivery.create({
+          data: {
+            orderId: order.id,
+            date,
+            loadGroupId: p.fromLoadGroupId,
+            notes: "Billed from a loading trip",
+            items: { create: items },
+          },
+        });
+        await applyStockDeltas(stockDeltasFor(items, []));
+        await recomputeOrderStatus(order.id);
+      }
+    }
+  }
+
   revalidatePath("/clients/register");
   revalidatePath("/clients");
   revalidatePath(`/clients/${client.id}`);
+  revalidatePath("/loading");
   revalidatePath("/cash");
 }
 

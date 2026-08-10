@@ -30,6 +30,19 @@ export type RegisterRow = {
 };
 
 type Option = { id: string; label: string };
+
+// A loading trip for a named customer that never became an order.
+export type UnbilledLoad = {
+  loadGroupId: string;
+  date: string;
+  clientId: string;
+  clientName: string;
+  phone: string;
+  location: string;
+  brickSizeId: string;
+  sizeLabel: string;
+  bricks: number;
+};
 type Method = "cash" | "gpay" | "bank" | "upi" | "cheque";
 
 const blankDraft = (sizes: Option[], types: Option[]) => ({
@@ -53,6 +66,7 @@ export function RegisterView({
   types,
   priceFor,
   status,
+  unbilled,
   onCreate,
   onPay,
   onSetStatus,
@@ -64,13 +78,17 @@ export function RegisterView({
   // same way the office already knows it by heart.
   priceFor: Record<string, number>;
   status: string;
-  onCreate: (d: ReturnType<typeof blankDraft>) => Promise<void>;
+  unbilled: UnbilledLoad[];
+  onCreate: (d: ReturnType<typeof blankDraft> & { fromLoadGroupId?: string }) => Promise<void>;
   onPay: (d: { orderId: string; amount: number; date: string; method: Method }) => Promise<void>;
   onSetStatus: (orderId: string, status: string) => Promise<void>;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState(() => blankDraft(sizes, types));
   const [adding, setAdding] = useState(false);
+  const [showUnbilled, setShowUnbilled] = useState(false);
+  // Set while billing a load, so the saved order also books the delivery.
+  const [fromLoad, setFromLoad] = useState<UnbilledLoad | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [payFor, setPayFor] = useState<RegisterRow | null>(null);
   const [payAmount, setPayAmount] = useState<number>(0);
@@ -111,9 +129,10 @@ export function RegisterView({
     if (!draft.pricePerBrick || draft.pricePerBrick <= 0) return setError("Enter the rate");
     startTransition(async () => {
       try {
-        await onCreate(draft);
+        await onCreate({ ...draft, fromLoadGroupId: fromLoad?.loadGroupId });
         setDraft(blankDraft(sizes, types));
         setAdding(false);
+        setFromLoad(null);
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not save the row");
@@ -146,14 +165,88 @@ export function RegisterView({
     });
   };
 
+  // Everything about the trip is already known except the price, so prefill it
+  // and put the cursor on the one thing the office has to decide.
+  const billLoad = (u: UnbilledLoad) => {
+    setFromLoad(u);
+    setDraft({
+      ...blankDraft(sizes, types),
+      date: u.date,
+      phone: u.phone,
+      name: u.clientName,
+      location: u.location,
+      brickSizeId: u.brickSizeId || sizes[0]?.id || "",
+      quantity: u.bricks,
+      pricePerBrick: 0,
+    });
+    setAdding(true);
+    setShowUnbilled(false);
+  };
+
   return (
     <div className="space-y-4">
+      {/* Bricks that went out but were never billed */}
+      {unbilled.length > 0 && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 overflow-hidden">
+          <button
+            onClick={() => setShowUnbilled((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <div>
+              <div className="text-[13px] font-bold text-amber-900">
+                {unbilled.length} load{unbilled.length === 1 ? "" : "s"} went out with no order
+              </div>
+              <div className="text-[11px] text-amber-800/80 mt-0.5">
+                Bricks were loaded for a customer but never billed - they are not in this register
+                and not counted as sold.
+              </div>
+            </div>
+            <span className="text-[12px] font-semibold text-amber-900 whitespace-nowrap">
+              {showUnbilled ? "Hide" : "Show"}
+            </span>
+          </button>
+          {showUnbilled && (
+            <div className="border-t border-amber-200 divide-y divide-amber-200">
+              {unbilled.map((u) => (
+                <div key={u.loadGroupId} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-ink">
+                      {u.clientName}
+                      <span className="text-slate-500 font-normal">
+                        {u.location ? ` · ${u.location}` : ""}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      {formatShortDate(new Date(u.date))} · {formatNumber(u.bricks)} bricks ·{" "}
+                      {u.sizeLabel}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => billLoad(u)}
+                    className="px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap"
+                  >
+                    Bill it
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* One-line entry — the whole row, the way it goes into the book */}
       {adding ? (
         <Card className="border-2 border-brand-red/30">
           <div className="text-[12px] font-bold uppercase tracking-wider text-ink mb-3">
-            New register row
+            {fromLoad ? "Bill the load that went out" : "New register row"}
           </div>
+          {fromLoad && (
+            <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              {formatNumber(fromLoad.bricks)} bricks went to <b>{fromLoad.clientName}</b> on{" "}
+              {formatShortDate(new Date(fromLoad.date))}. Everything is filled in except the rate -
+              enter it and this becomes an order with those bricks already delivered.
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
             <Field label="Date">
               <Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} />
@@ -272,6 +365,7 @@ export function RegisterView({
             <Button
               onClick={() => {
                 setAdding(false);
+                setFromLoad(null);
                 setError(null);
               }}
               variant="ghost"
