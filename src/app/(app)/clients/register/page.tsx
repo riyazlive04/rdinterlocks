@@ -170,6 +170,25 @@ export default async function RegisterPage({
   }
   const unbilled = [...unbilledMap.values()];
 
+  // Customers a telecaller opened — no order yet, and nothing loaded for them
+  // either, so they are still waiting rather than lost.
+  const loadedClientIds = new Set(loadedRows.map((r) => r.clientId));
+  const waitingRaw = await prisma.client.findMany({
+    where: { active: true, orders: { none: {} } },
+    include: { payments: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const waiting = waitingRaw
+    .filter((c) => !loadedClientIds.has(c.id))
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone ?? "",
+      location: c.location ?? "",
+      advance: c.payments.reduce((s, p) => s + p.amount, 0),
+      since: c.createdAt.toISOString(),
+    }));
+
   const href = (overrides: Record<string, string | undefined>) => {
     const u = new URLSearchParams();
     const merged: Record<string, string | undefined> = { status, q: q || undefined, ...overrides };
@@ -234,6 +253,7 @@ export default async function RegisterPage({
         rows={pageRows}
         status={status}
         unbilled={unbilled}
+        waiting={waiting}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
         types={types.map((t) => ({ id: t.id, label: t.name }))}
         priceFor={priceFor}

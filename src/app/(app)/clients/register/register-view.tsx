@@ -43,6 +43,16 @@ export type UnbilledLoad = {
   sizeLabel: string;
   bricks: number;
 };
+// Opened by a telecaller with a name, number and advance — no order yet.
+export type WaitingClient = {
+  id: string;
+  name: string;
+  phone: string;
+  location: string;
+  advance: number;
+  since: string;
+};
+
 type Method = "cash" | "gpay" | "bank" | "upi" | "cheque";
 
 const blankDraft = (sizes: Option[], types: Option[]) => ({
@@ -67,6 +77,7 @@ export function RegisterView({
   priceFor,
   status,
   unbilled,
+  waiting,
   onCreate,
   onPay,
   onSetStatus,
@@ -79,6 +90,7 @@ export function RegisterView({
   priceFor: Record<string, number>;
   status: string;
   unbilled: UnbilledLoad[];
+  waiting: WaitingClient[];
   onCreate: (d: ReturnType<typeof blankDraft> & { fromLoadGroupId?: string }) => Promise<void>;
   onPay: (d: { orderId: string; amount: number; date: string; method: Method }) => Promise<void>;
   onSetStatus: (orderId: string, status: string) => Promise<void>;
@@ -87,6 +99,7 @@ export function RegisterView({
   const [draft, setDraft] = useState(() => blankDraft(sizes, types));
   const [adding, setAdding] = useState(false);
   const [showUnbilled, setShowUnbilled] = useState(false);
+  const [showWaiting, setShowWaiting] = useState(false);
   // Set while billing a load, so the saved order also books the delivery.
   const [fromLoad, setFromLoad] = useState<UnbilledLoad | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -125,8 +138,15 @@ export function RegisterView({
   const save = () => {
     setError(null);
     if (!draft.name.trim()) return setError("Enter the customer name");
-    if (!draft.quantity || draft.quantity <= 0) return setError("Enter the total bricks");
-    if (!draft.pricePerBrick || draft.pricePerBrick <= 0) return setError("Enter the rate");
+    // A telecaller's row is just the customer and their advance. Bricks and
+    // rate come later, when the lorry is loaded — but half of a pair is a
+    // mistake worth catching.
+    const wantsOrder = draft.quantity > 0 || draft.pricePerBrick > 0;
+    if (wantsOrder && draft.quantity <= 0) return setError("Enter the total bricks, or clear the rate");
+    if (wantsOrder && draft.pricePerBrick <= 0) return setError("Enter the rate, or clear the bricks");
+    if (!wantsOrder && draft.advance <= 0 && !fromLoad) {
+      return setError("Enter an advance, or the bricks and rate");
+    }
     startTransition(async () => {
       try {
         await onCreate({ ...draft, fromLoadGroupId: fromLoad?.loadGroupId });
@@ -185,6 +205,63 @@ export function RegisterView({
 
   return (
     <div className="space-y-4">
+      {/* Customers a telecaller opened - name and advance, nothing ordered yet */}
+      {waiting.length > 0 && (
+        <div className="rounded-2xl border border-blue-300 bg-blue-50 overflow-hidden">
+          <button
+            onClick={() => setShowWaiting((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <div>
+              <div className="text-[13px] font-bold text-blue-900">
+                {waiting.length} customer{waiting.length === 1 ? "" : "s"} waiting to be loaded
+              </div>
+              <div className="text-[11px] text-blue-800/80 mt-0.5">
+                Opened with a name and an advance. They become a sale when the lorry is loaded and
+                the rate is entered on the loading screen.
+              </div>
+            </div>
+            <span className="text-[12px] font-semibold text-blue-900 whitespace-nowrap">
+              {showWaiting ? "Hide" : "Show"}
+            </span>
+          </button>
+          {showWaiting && (
+            <div className="border-t border-blue-200 divide-y divide-blue-200">
+              {waiting.map((w) => (
+                <div key={w.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-ink">
+                      {w.name}
+                      <span className="text-slate-500 font-normal">
+                        {w.location ? ` · ${w.location}` : ""}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      {w.phone ? `${w.phone} · ` : ""}since {formatShortDate(new Date(w.since))}
+                    </div>
+                  </div>
+                  <div className="text-right whitespace-nowrap">
+                    {w.advance > 0 ? (
+                      <div className="num text-[12px] font-bold text-emerald-700">
+                        {formatINR(w.advance)} advance
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400">no advance</div>
+                    )}
+                    <Link
+                      href="/loading/new"
+                      className="text-[11px] font-semibold text-brand-blue hover:underline"
+                    >
+                      Enter loading →
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bricks that went out but were never billed */}
       {unbilled.length > 0 && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 overflow-hidden">
@@ -298,14 +375,14 @@ export function RegisterView({
                 ))}
               </Select>
             </Field>
-            <Field label="Rate ₹">
+            <Field label="Rate ₹ (later)">
               <Input
                 type="number"
                 value={draft.pricePerBrick || ""}
                 onChange={(e) => set({ pricePerBrick: Number(e.target.value || 0) })}
               />
             </Field>
-            <Field label="Total bricks">
+            <Field label="Total bricks (later)">
               <Input
                 type="number"
                 value={draft.quantity || ""}

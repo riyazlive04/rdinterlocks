@@ -44,6 +44,8 @@ type Sub = {
   items: Array<{ brickSizeId?: string; brickCount: number }>;
   slabCount: number;
   orderId?: string;
+  saleRate?: number;
+  constructionTypeId?: string;
   loading?: Crew;
   unloading?: Crew;
   tipperId?: string;
@@ -64,6 +66,7 @@ const CHARGE_PRESETS: Array<{ name: string; unit: string }> = [
 export function LoadingMultiForm({
   workers,
   sizes,
+  types,
   clients,
   orders,
   tippers,
@@ -72,6 +75,7 @@ export function LoadingMultiForm({
 }: {
   workers: { loaders: WorkerOption[]; operators: WorkerOption[]; employees: WorkerOption[] };
   sizes: Array<{ id: string; label: string }>;
+  types: Array<{ id: string; label: string }>;
   clients: ClientOption[];
   orders: OrderOption[];
   tippers: TipperOption[];
@@ -90,6 +94,10 @@ export function LoadingMultiForm({
   const [slabCount, setSlabCount] = useState<number>(0);
   const [clientId, setClientId] = useState<string>("");
   const [orderId, setOrderId] = useState<string>("");
+  // Rate agreed with the customer when the lorry is loaded. The telecaller only
+  // took a name and an advance, so this is where the sale actually gets priced.
+  const [saleRate, setSaleRate] = useState<number>(0);
+  const [saleTypeId, setSaleTypeId] = useState<string>(types[0]?.id ?? "");
   const [vehicleRequested, setVehicleRequested] = useState<string>("");
 
   const [tipperId, setTipperId] = useState<string>("");
@@ -319,6 +327,8 @@ export function LoadingMultiForm({
             .map((l) => ({ brickSizeId: l.brickSizeId || undefined, brickCount: l.brickCount })),
           slabCount,
           orderId: orderId || undefined,
+          saleRate: !orderId && saleRate > 0 ? saleRate : 0,
+          constructionTypeId: !orderId ? saleTypeId || undefined : undefined,
           loading: showLoad
             ? {
                 workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })),
@@ -514,15 +524,15 @@ export function LoadingMultiForm({
 
       {/* Deliver against an order — what makes the customer's balance move */}
       {clientId && clientId !== INTERNAL && (
-        <div className="mt-3">
-          {clientOrders.length === 0 ? (
-            <div className="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2.5">
-              This customer has no open order, so these bricks are recorded as loading work only.
-            </div>
-          ) : (
-            <Field label="Deliver against order">
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <div className="text-[12px] font-bold uppercase tracking-wider text-ink mb-2">
+            The sale
+          </div>
+
+          {clientOrders.length > 0 && (
+            <Field label="Deliver against an existing order">
               <Select value={orderId} onChange={(e) => setOrderId(e.target.value)}>
-                <option value="">- don&apos;t record a delivery (wages only) -</option>
+                <option value="">- new sale, priced below -</option>
                 {clientOrders.map((o) => (
                   <option key={o.id} value={o.id}>
                     {new Date(o.date).toLocaleDateString("en-IN", {
@@ -537,6 +547,58 @@ export function LoadingMultiForm({
               </Select>
             </Field>
           )}
+
+          {/* No order picked: price the load here and the sale is created. */}
+          {!orderId && (
+            <div className="grid sm:grid-cols-3 gap-3 mt-3">
+              <Field label="Rate ₹ / brick" hint="What the customer pays">
+                <Input
+                  type="number"
+                  step="0.5"
+                  value={saleRate || ""}
+                  onChange={(e) => setSaleRate(Number(e.target.value || 0))}
+                />
+              </Field>
+              <Field label="Room / Compound">
+                <Select value={saleTypeId} onChange={(e) => setSaleTypeId(e.target.value)}>
+                  {types.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="flex items-end">
+                <div className="text-[12px] text-slate-600">
+                  {saleRate > 0 && hasBricks ? (
+                    <>
+                      Sale value{" "}
+                      <span className="num font-bold text-ink">
+                        {formatINR(Math.round(brickCount * saleRate))}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-400">Enter a rate to bill this load</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!orderId && saleRate > 0 && hasBricks && (
+            <div className="text-[11px] mt-1.5 text-emerald-700 font-semibold">
+              {formatNumber(brickCount)} bricks × ₹{saleRate} ={" "}
+              {formatINR(Math.round(brickCount * saleRate))} - an order is created for this
+              customer, already delivered, and any advance they paid is set against it.
+            </div>
+          )}
+          {!orderId && saleRate <= 0 && (
+            <div className="text-[11px] mt-1.5 text-amber-700">
+              Leave the rate blank and this stays loading work only - it will show in the Sales
+              register as a load that went out with no order.
+            </div>
+          )}
+
           {selectedOrder && hasBricks && (
             <div
               className={clsx(
@@ -553,10 +615,10 @@ export function LoadingMultiForm({
                   )} left after this.`}
             </div>
           )}
-          {selectedOrder && hasSlabs && (
+          {hasSlabs && (
             <div className="text-[11px] mt-1 text-slate-500">
-              The {formatNumber(slabCount)} slabs stay as loading work - slabs are priced on the
-              order&apos;s own slab lines, not delivered as bricks.
+              The {formatNumber(slabCount)} lintel beams stay as loading work - beams are priced on
+              their own order lines, not delivered as bricks.
             </div>
           )}
         </div>

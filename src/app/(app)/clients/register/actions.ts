@@ -15,10 +15,14 @@ const rowSchema = z.object({
   phone: z.string().optional(),
   name: z.string().min(1, "Name is needed"),
   location: z.string().optional(),
-  brickSizeId: z.string().min(1, "Pick the brick size"),
-  constructionTypeId: z.string().min(1, "Pick room / compound"),
-  quantity: z.number().int().positive("Total bricks must be more than 0"),
-  pricePerBrick: z.number().positive("Rate must be more than 0"),
+  // All four are optional: a telecaller opens the customer with only a name,
+  // number, place and advance, and what they are buying is agreed later when
+  // the lorry is loaded. Leave them blank and no order is created — just the
+  // customer and their advance.
+  brickSizeId: z.string().optional(),
+  constructionTypeId: z.string().optional(),
+  quantity: z.number().int().nonnegative().default(0),
+  pricePerBrick: z.number().nonnegative().default(0),
   advance: z.number().nonnegative().default(0),
   advanceMethod: z.enum(["cash", "gpay", "bank", "upi", "cheque"]).default("cash"),
   expectedDeliveryDate: z.string().optional(),
@@ -79,6 +83,38 @@ export async function createRegisterRow(input: RegisterRowInput) {
     await prisma.client.update({ where: { id: client.id }, data: fill });
   }
 
+  // Customer-only row: record the advance against them and stop there.
+  if (!p.quantity || !p.pricePerBrick || !p.brickSizeId || !p.constructionTypeId) {
+    if (p.advance > 0) {
+      await prisma.cashEntry.create({
+        data: {
+          date,
+          amount: p.advance,
+          direction: "in",
+          source: "sale",
+          category: "Advance from client",
+          title: `${client.name} - advance`,
+          method: p.advanceMethod,
+          clientPayment: {
+            create: {
+              clientId: client.id,
+              orderId: null,
+              date,
+              amount: p.advance,
+              method: p.advanceMethod,
+              notes: "Advance taken before the order (register)",
+            },
+          },
+        },
+      });
+    }
+    revalidatePath("/clients/register");
+    revalidatePath("/clients");
+    revalidatePath(`/clients/${client.id}`);
+    revalidatePath("/cash");
+    return;
+  }
+
   const status = deriveOrderStatus({
     orderedQty: p.quantity,
     deliveredQty: 0,
@@ -96,8 +132,8 @@ export async function createRegisterRow(input: RegisterRowInput) {
       items: {
         create: [
           {
-            brickSizeId: p.brickSizeId,
-            constructionTypeId: p.constructionTypeId,
+            brickSizeId: p.brickSizeId!,
+            constructionTypeId: p.constructionTypeId!,
             quantity: p.quantity,
             pricePerBrick: p.pricePerBrick,
             total: p.quantity * p.pricePerBrick,
@@ -149,7 +185,7 @@ export async function createRegisterRow(input: RegisterRowInput) {
       }
       const items = [...perSize.entries()].map(([brickSizeId, quantity]) => ({
         brickSizeId,
-        constructionTypeId: p.constructionTypeId,
+        constructionTypeId: p.constructionTypeId!,
         quantity,
         // The rate just agreed on this row applies to the size it was for;
         // any other size on the trip is billed at the same rate rather than
@@ -270,8 +306,8 @@ export async function updateRegisterRow(input: z.infer<typeof editSchema>) {
       items: {
         create: [
           {
-            brickSizeId: p.brickSizeId,
-            constructionTypeId: p.constructionTypeId,
+            brickSizeId: p.brickSizeId!,
+            constructionTypeId: p.constructionTypeId!,
             quantity: p.quantity,
             pricePerBrick: p.pricePerBrick,
             total: p.quantity * p.pricePerBrick,

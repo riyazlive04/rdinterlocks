@@ -4,12 +4,13 @@ import { LoadingMultiForm } from "./multi-form";
 import { createLoadingWork } from "../actions";
 
 export default async function NewLoadingPage() {
-  const [loaders, operators, employees, sizes, clients, tippers, vendors, openOrders] =
+  const [loaders, operators, employees, sizes, types, clients, tippers, vendors, openOrders] =
     await Promise.all([
       prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
+      prisma.constructionType.findMany({ orderBy: { order: "asc" } }),
       prisma.client.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.tipper.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.vendor.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
@@ -71,6 +72,7 @@ export default async function NewLoadingPage() {
       <LoadingMultiForm
         workers={workers}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
+        types={types.map((t) => ({ id: t.id, label: t.name }))}
         clients={clients.map((c) => ({ id: c.id, name: c.name, location: c.location ?? undefined }))}
         orders={orderOptions}
         tippers={tippers.map((t) => ({ id: t.id, name: t.name, ownership: t.ownership }))}

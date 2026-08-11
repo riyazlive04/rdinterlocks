@@ -66,6 +66,11 @@ const createSchema = z
     // When the trip is against a customer's open order, the bricks that left
     // the yard are booked as a Delivery on it. Blank = wages only.
     orderId: z.string().optional(),
+    // The other way round: no order exists yet (the telecaller only took the
+    // customer's name and advance), so the manager types the agreed rate here
+    // and the sale is created from the load itself.
+    saleRate: z.number().nonnegative().default(0),
+    constructionTypeId: z.string().optional(),
     vehicleRequested: z.string().optional(),
     loading: crewSchema.optional(),
     unloading: crewSchema.optional(),
@@ -180,6 +185,68 @@ async function wireTipper(
   });
 }
 
+// Create the sale from the load: an order for exactly what went out, at the
+// rate the manager typed, already delivered. Any advance the telecaller took
+// when they opened the customer is attached to it, so the balance is right the
+// moment the entry is saved.
+async function sellFromLoad(p: CreateParsed, loadGroupId: string, date: Date) {
+  if (!p.clientId || p.saleRate <= 0) return;
+
+  const type = p.constructionTypeId
+    ? await prisma.constructionType.findUnique({ where: { id: p.constructionTypeId } })
+    : await prisma.constructionType.findFirst({ orderBy: { order: "asc" } });
+  if (!type) return;
+
+  const items = p.items
+    .filter((i) => i.brickSizeId)
+    .map((i) => ({
+      brickSizeId: i.brickSizeId!,
+      constructionTypeId: type.id,
+      quantity: i.brickCount,
+      pricePerBrick: p.saleRate,
+      total: i.brickCount * p.saleRate,
+    }));
+  if (items.length === 0) return;
+
+  const value = items.reduce((s, i) => s + i.total, 0);
+
+  const order = await prisma.order.create({
+    data: {
+      clientId: p.clientId,
+      date,
+      // Everything ordered went out on this trip, so it is complete already.
+      status: "completed",
+      notes: "Sold on the loading trip",
+      items: { create: items },
+      deliveries: {
+        create: [
+          {
+            date,
+            loadGroupId,
+            notes: "Auto from loading entry",
+            items: { create: items },
+          },
+        ],
+      },
+    },
+  });
+
+  await applyStockDeltas(stockDeltasFor(items, []));
+
+  // Attach what the customer already paid — biggest first, only where it fits,
+  // so a customer with several loads doesn't get everything on the first one.
+  const unallocated = await prisma.clientPayment.findMany({
+    where: { clientId: p.clientId, orderId: null },
+  });
+  let left = value;
+  for (const pay of [...unallocated].sort((a, b) => b.amount - a.amount)) {
+    if (left <= 0) break;
+    if (pay.amount > left) continue;
+    await prisma.clientPayment.update({ where: { id: pay.id }, data: { orderId: order.id } });
+    left -= pay.amount;
+  }
+}
+
 // ── The bricks that left the yard, booked against the customer's order ─────
 //
 // Loading used to record only who was paid. That left the order saying nothing
@@ -192,7 +259,14 @@ async function wireTipper(
 // lines, which DeliveryItem cannot represent. They still show as loaded and
 // still earn wages.
 async function wireDelivery(p: CreateParsed, loadGroupId: string, date: Date) {
-  if (!p.orderId || p.items.length === 0) return;
+  if (p.items.length === 0) return;
+  // No order picked, but a rate was typed: the load itself is the sale. This is
+  // the normal path here — a telecaller opens the customer with just a name and
+  // an advance, and the price is only agreed when the lorry is loaded.
+  if (!p.orderId) {
+    await sellFromLoad(p, loadGroupId, date);
+    return;
+  }
 
   const order = await prisma.order.findUnique({
     where: { id: p.orderId },
