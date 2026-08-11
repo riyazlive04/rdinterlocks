@@ -71,6 +71,10 @@ const createSchema = z
     // and the sale is created from the load itself.
     saleRate: z.number().nonnegative().default(0),
     constructionTypeId: z.string().optional(),
+    // Money handed over at the lorry. Separate from any advance the telecaller
+    // already took — that is attached automatically; this is new cash.
+    payNow: z.number().nonnegative().default(0),
+    payNowMethod: method.default("cash"),
     vehicleRequested: z.string().optional(),
     loading: crewSchema.optional(),
     unloading: crewSchema.optional(),
@@ -185,6 +189,40 @@ async function wireTipper(
   });
 }
 
+// Cash the manager collects when the lorry goes out. It is a client payment on
+// the order, so it shows in the cash book, on the customer and in the balance —
+// the same as taking the money on the client screen.
+async function takePayment(
+  p: CreateParsed,
+  orderId: string,
+  clientId: string,
+  clientName: string,
+  date: Date
+) {
+  if (p.payNow <= 0) return;
+  await prisma.cashEntry.create({
+    data: {
+      date,
+      amount: p.payNow,
+      direction: "in",
+      source: "sale",
+      category: "Client payment",
+      title: `${clientName} - paid on loading`,
+      method: p.payNowMethod,
+      clientPayment: {
+        create: {
+          clientId,
+          orderId,
+          date,
+          amount: p.payNow,
+          method: p.payNowMethod,
+          notes: "Collected when the load went out",
+        },
+      },
+    },
+  });
+}
+
 // Create the sale from the load: an order for exactly what went out, at the
 // rate the manager typed, already delivered. Any advance the telecaller took
 // when they opened the customer is attached to it, so the balance is right the
@@ -245,6 +283,9 @@ async function sellFromLoad(p: CreateParsed, loadGroupId: string, date: Date) {
     await prisma.clientPayment.update({ where: { id: pay.id }, data: { orderId: order.id } });
     left -= pay.amount;
   }
+
+  const client = await prisma.client.findUnique({ where: { id: p.clientId } });
+  await takePayment(p, order.id, p.clientId, client?.name ?? "Customer", date);
 }
 
 // ── The bricks that left the yard, booked against the customer's order ─────
@@ -320,6 +361,9 @@ async function wireDelivery(p: CreateParsed, loadGroupId: string, date: Date) {
   // Same FIFO draw-down the client screen uses, so stock agrees either way.
   await applyStockDeltas(stockDeltasFor(priced, []));
   await recomputeOrderStatus(order.id);
+
+  const client = await prisma.client.findUnique({ where: { id: order.clientId } });
+  await takePayment(p, order.id, order.clientId, client?.name ?? "Customer", date);
 }
 
 // ── Auto-wiring: turn the tipper + charges on a load into Tipper loads,

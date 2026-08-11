@@ -11,7 +11,13 @@ export default async function NewLoadingPage() {
       prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
       prisma.constructionType.findMany({ orderBy: { order: "asc" } }),
-      prisma.client.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+      // Advance already taken by a telecaller rides along, so the loading
+      // screen can show what is really outstanding.
+      prisma.client.findMany({
+        where: { active: true },
+        include: { payments: { where: { orderId: null } } },
+        orderBy: { name: "asc" },
+      }),
       prisma.tipper.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.vendor.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       // Orders still owed bricks, so the entry can book what left the yard
@@ -73,7 +79,12 @@ export default async function NewLoadingPage() {
         workers={workers}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
         types={types.map((t) => ({ id: t.id, label: t.name }))}
-        clients={clients.map((c) => ({ id: c.id, name: c.name, location: c.location ?? undefined }))}
+        clients={clients.map((c) => ({
+          id: c.id,
+          name: c.name,
+          location: c.location ?? undefined,
+          advance: c.payments.reduce((s, p) => s + p.amount, 0),
+        }))}
         orders={orderOptions}
         tippers={tippers.map((t) => ({ id: t.id, name: t.name, ownership: t.ownership }))}
         vendors={vendors.map((v) => ({ id: v.id, name: v.name }))}

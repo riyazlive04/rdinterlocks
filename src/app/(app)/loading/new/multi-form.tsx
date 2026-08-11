@@ -16,7 +16,7 @@ type Crew = {
   ratePerBrick: number;
   ratePerSlab: number;
 };
-type ClientOption = { id: string; name: string; location?: string };
+type ClientOption = { id: string; name: string; location?: string; advance: number };
 type OrderOption = {
   id: string;
   clientId: string;
@@ -46,6 +46,8 @@ type Sub = {
   orderId?: string;
   saleRate?: number;
   constructionTypeId?: string;
+  payNow?: number;
+  payNowMethod?: "cash" | "gpay" | "bank" | "upi" | "cheque";
   loading?: Crew;
   unloading?: Crew;
   tipperId?: string;
@@ -98,6 +100,9 @@ export function LoadingMultiForm({
   // took a name and an advance, so this is where the sale actually gets priced.
   const [saleRate, setSaleRate] = useState<number>(0);
   const [saleTypeId, setSaleTypeId] = useState<string>(types[0]?.id ?? "");
+  // Cash handed over at the lorry, on top of anything already advanced.
+  const [payNow, setPayNow] = useState<number>(0);
+  const [payNowMethod, setPayNowMethod] = useState<"cash" | "gpay" | "bank" | "upi" | "cheque">("cash");
   const [vehicleRequested, setVehicleRequested] = useState<string>("");
 
   const [tipperId, setTipperId] = useState<string>("");
@@ -139,6 +144,9 @@ export function LoadingMultiForm({
   const tipper = tippers.find((t) => t.id === tipperId);
   const tipperIsOwn = tipper?.ownership === "own";
 
+  const client = clients.find((c) => c.id === clientId);
+  const priorAdvance = client?.advance ?? 0;
+  const saleValue = Math.round(brickCount * (saleRate || 0));
   const clientOrders = orders.filter((o) => o.clientId === clientId);
   const selectedOrder = orders.find((o) => o.id === orderId);
 
@@ -329,6 +337,8 @@ export function LoadingMultiForm({
           orderId: orderId || undefined,
           saleRate: !orderId && saleRate > 0 ? saleRate : 0,
           constructionTypeId: !orderId ? saleTypeId || undefined : undefined,
+          payNow: payNow > 0 ? payNow : 0,
+          payNowMethod,
           loading: showLoad
             ? {
                 workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })),
@@ -585,11 +595,75 @@ export function LoadingMultiForm({
             </div>
           )}
 
+          {/* Money at the lorry: what was already advanced, what is handed over
+              now, and what is still owed. */}
+          {(saleRate > 0 || orderId) && (
+            <div className="grid sm:grid-cols-3 gap-3 mt-3">
+              <Field label="Received now ₹" hint="Cash taken at the lorry">
+                <Input
+                  type="number"
+                  value={payNow || ""}
+                  onChange={(e) => setPayNow(Number(e.target.value || 0))}
+                />
+              </Field>
+              <Field label="Paid by">
+                <Select
+                  value={payNowMethod}
+                  onChange={(e) =>
+                    setPayNowMethod(e.target.value as "cash" | "gpay" | "bank" | "upi" | "cheque")
+                  }
+                >
+                  <option value="cash">Cash</option>
+                  <option value="gpay">GPay</option>
+                  <option value="upi">UPI</option>
+                  <option value="bank">Bank</option>
+                  <option value="cheque">Cheque</option>
+                </Select>
+              </Field>
+              <div className="flex items-end">
+                {priorAdvance > 0 && (
+                  <div className="text-[11px] text-slate-600">
+                    Advance already paid{" "}
+                    <span className="num font-bold text-emerald-700">
+                      {formatINR(priorAdvance)}
+                    </span>
+                    <div className="text-slate-400">attached automatically</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {!orderId && saleRate > 0 && hasBricks && (
-            <div className="text-[11px] mt-1.5 text-emerald-700 font-semibold">
-              {formatNumber(brickCount)} bricks × ₹{saleRate} ={" "}
-              {formatINR(Math.round(brickCount * saleRate))} - an order is created for this
-              customer, already delivered, and any advance they paid is set against it.
+            <div className="mt-2 bg-slate-50 rounded-xl p-2.5 text-[12px]">
+              <div className="flex justify-between">
+                <span>{formatNumber(brickCount)} bricks × ₹{saleRate}</span>
+                <span className="num font-bold text-ink">{formatINR(saleValue)}</span>
+              </div>
+              {priorAdvance > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>less advance already paid</span>
+                  <span className="num">−{formatINR(Math.min(priorAdvance, saleValue))}</span>
+                </div>
+              )}
+              {payNow > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>less received now</span>
+                  <span className="num">−{formatINR(payNow)}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-slate-200 mt-1.5 pt-1.5 font-bold">
+                <span>Balance</span>
+                <span className="num text-brand-red">
+                  {formatINR(
+                    Math.max(0, saleValue - Math.min(priorAdvance, saleValue) - (payNow || 0))
+                  )}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-500 mt-1">
+                An order is created for this customer, already delivered, with this money set
+                against it.
+              </div>
             </div>
           )}
           {!orderId && saleRate <= 0 && (
