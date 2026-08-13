@@ -174,9 +174,29 @@ export async function createRegisterRow(input: RegisterRowInput) {
     const already = await prisma.delivery.count({
       where: { loadGroupId: p.fromLoadGroupId },
     });
-    const rows = await prisma.loadingWork.findMany({
-      where: { loadGroupId: p.fromLoadGroupId, phase: { not: "unloading" }, loadType: "brick" },
-    });
+    // Loads saved before load groups existed have no id to match on, so the
+    // register identifies them by customer, day and size instead. Resolve both
+    // shapes back to the rows that actually made up the trip.
+    const synthetic = p.fromLoadGroupId.includes("|");
+    let where: Record<string, unknown> = {
+      loadGroupId: p.fromLoadGroupId,
+      phase: { not: "unloading" },
+      loadType: "brick",
+    };
+    if (synthetic) {
+      const [cid, day, sizeId] = p.fromLoadGroupId.split("|");
+      const dayStart = new Date(`${day}T00:00:00.000Z`);
+      const dayEnd = new Date(dayStart.getTime() + 86400000);
+      where = {
+        clientId: cid,
+        date: { gte: dayStart, lt: dayEnd },
+        brickSizeId: sizeId === "mixed" ? null : sizeId,
+        loadGroupId: null,
+        phase: { not: "unloading" },
+        loadType: "brick",
+      };
+    }
+    const rows = await prisma.loadingWork.findMany({ where });
     if (already === 0 && rows.length > 0) {
       const perSize = new Map<string, number>();
       for (const r of rows) {

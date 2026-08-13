@@ -9,6 +9,7 @@
  * and the report says so rather than guessing.
  *
  *   npx tsx prisma/bill-unbilled-loads.ts                                # report
+ *   npx tsx prisma/bill-unbilled-loads.ts --all [--apply]                # bill every one
  *   npx tsx prisma/bill-unbilled-loads.ts --bill=<loadGroupId> --rate=49 \
  *       [--type=Compound] --apply
  *
@@ -56,7 +57,11 @@ async function unbilledGroups(): Promise<Group[]> {
   );
   const map = new Map<string, Group>();
   for (const r of rows) {
-    const key = r.loadGroupId ?? r.id;
+    // Entries saved before load groups existed have no loadGroupId, and each
+    // worker on the trip is its own row. Keyed by row id they would look like
+    // a dozen tiny separate loads; the customer, day and size are what actually
+    // identify one trip, so fall back to that and the rows add back up.
+    const key = r.loadGroupId ?? `${r.clientId}|${r.date.toISOString().slice(0, 10)}|${r.brickSizeId ?? "mixed"}`;
     if (billed.has(key)) continue;
     const g = map.get(key) ?? {
       loadGroupId: key,
@@ -200,7 +205,79 @@ async function bill(loadGroupId: string, rate: number, typeName?: string) {
   );
 }
 
+// Bill every unbilled load in one pass. The rate for each comes from the best
+// evidence available, in this order:
+//   1. what this customer was last charged for that size
+//   2. the price matrix for that size × type
+// A load with no rate from either is skipped and named, never guessed at zero.
+async function billAll() {
+  const groups = await unbilledGroups();
+  const matrix = await prisma.brickPrice.findMany({ where: { active: true } });
+  const type =
+    (await prisma.constructionType.findFirst({ where: { name: { equals: "Compound", mode: "insensitive" } } })) ??
+    (await prisma.constructionType.findFirst({ orderBy: { order: "asc" } }));
+  if (!type) throw new Error("No construction type to bill against");
+
+  // Last rate this customer actually paid for a size.
+  const history = await prisma.orderItem.findMany({
+    include: { order: true },
+    orderBy: { order: { date: "desc" } },
+  });
+  const lastRate = new Map<string, number>();
+  for (const i of history) {
+    const key = `${i.order.clientId}:${i.brickSizeId}`;
+    if (!lastRate.has(key) && i.pricePerBrick > 0) lastRate.set(key, i.pricePerBrick);
+  }
+  const matrixRate = new Map(
+    matrix.map((m) => [`${m.brickSizeId}:${m.constructionTypeId}`, m.sellPrice])
+  );
+
+  const plan = groups.map((g) => {
+    const own = g.brickSizeId ? lastRate.get(`${g.clientId}:${g.brickSizeId}`) : undefined;
+    const mx = g.brickSizeId ? matrixRate.get(`${g.brickSizeId}:${type.id}`) : undefined;
+    const rate = own ?? mx ?? 0;
+    return { g, rate, source: own ? "customer's last rate" : mx ? "price matrix" : "none" };
+  });
+
+  const doable = plan.filter((x) => x.rate > 0 && x.g.brickSizeId);
+  const skipped = plan.filter((x) => !(x.rate > 0 && x.g.brickSizeId));
+
+  console.log("date        customer          bricks  size    rate   value      from");
+  console.log("-".repeat(80));
+  let total = 0;
+  for (const x of doable) {
+    const value = x.g.bricks * x.rate;
+    total += value;
+    console.log(
+      `${x.g.date.toISOString().slice(0, 10)}  ${x.g.clientName.slice(0, 16).padEnd(16)} ` +
+        `${String(x.g.bricks).padStart(6)}  ${x.g.sizeLabel.padEnd(6)} ${("Rs" + x.rate).padStart(6)} ` +
+        `${("Rs" + Math.round(value)).padStart(9)}   ${x.source}`
+    );
+  }
+  console.log(
+    `
+${doable.length} loads billable, worth Rs${Math.round(total).toLocaleString("en-IN")}.` +
+      (skipped.length ? `  ${skipped.length} skipped (no size or no rate).` : "")
+  );
+  for (const x of skipped) {
+    console.log(`  skipped: ${x.g.date.toISOString().slice(0, 10)} ${x.g.clientName} ${x.g.bricks} bricks`);
+  }
+
+  if (!APPLY) {
+    console.log("\nNothing written. Add --apply to bill all of these.");
+    return;
+  }
+  let done = 0;
+  for (const x of doable) {
+    await bill(x.g.loadGroupId, x.rate, type.name);
+    done++;
+  }
+  console.log(`
+Billed ${done} load(s).`);
+}
+
 async function main() {
+  if (process.argv.includes("--all")) return billAll();
   const target = arg("bill");
   if (!target) return report();
   const rate = Number(arg("rate"));

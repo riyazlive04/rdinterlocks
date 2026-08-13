@@ -6,7 +6,7 @@ import { requireArea } from "@/lib/auth";
 import { ORDER_STATUSES, deriveOrderStatus } from "@/lib/order-status";
 import { Pagination } from "@/components/pagination";
 import { RegisterView, type RegisterRow } from "./register-view";
-import { createRegisterRow, payRegisterRow } from "./actions";
+import { createRegisterRow } from "./actions";
 import { setOrderStatus } from "../actions";
 
 const PAGE_SIZE = 100;
@@ -152,7 +152,11 @@ export default async function RegisterPage({
     }
   >();
   for (const r of loadedRows) {
-    const key = r.loadGroupId ?? r.id;
+    // Older rows have no load group and one row per worker — group those by
+    // customer, day and size so a single trip counts once, not six times.
+    const key =
+      r.loadGroupId ??
+      `${r.clientId}|${r.date.toISOString().slice(0, 10)}|${r.brickSizeId ?? "mixed"}`;
     if (billedGroups.has(key)) continue;
     const g = unbilledMap.get(key) ?? {
       loadGroupId: key,
@@ -260,10 +264,6 @@ export default async function RegisterPage({
         onCreate={async (d) => {
           "use server";
           await createRegisterRow(d);
-        }}
-        onPay={async (d) => {
-          "use server";
-          await payRegisterRow(d);
         }}
         onSetStatus={async (orderId, next) => {
           "use server";

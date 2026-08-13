@@ -4,13 +4,14 @@ import { LoadingMultiForm } from "./multi-form";
 import { createLoadingWork } from "../actions";
 
 export default async function NewLoadingPage() {
-  const [loaders, operators, employees, sizes, types, clients, tippers, vendors, openOrders] =
+  const [loaders, operators, employees, sizes, types, prices, clients, tippers, vendors, openOrders] =
     await Promise.all([
       prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
       prisma.constructionType.findMany({ orderBy: { order: "asc" } }),
+      prisma.brickPrice.findMany({ where: { active: true } }),
       // Advance already taken by a telecaller rides along, so the loading
       // screen can show what is really outstanding.
       prisma.client.findMany({
@@ -79,6 +80,9 @@ export default async function NewLoadingPage() {
         workers={workers}
         sizes={sizes.map((s) => ({ id: s.id, label: s.label }))}
         types={types.map((t) => ({ id: t.id, label: t.name }))}
+        priceFor={Object.fromEntries(
+          prices.map((p) => [`${p.brickSizeId}:${p.constructionTypeId}`, p.sellPrice])
+        )}
         clients={clients.map((c) => ({
           id: c.id,
           name: c.name,

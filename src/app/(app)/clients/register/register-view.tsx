@@ -79,7 +79,6 @@ export function RegisterView({
   unbilled,
   waiting,
   onCreate,
-  onPay,
   onSetStatus,
 }: {
   rows: RegisterRow[];
@@ -92,7 +91,6 @@ export function RegisterView({
   unbilled: UnbilledLoad[];
   waiting: WaitingClient[];
   onCreate: (d: ReturnType<typeof blankDraft> & { fromLoadGroupId?: string }) => Promise<void>;
-  onPay: (d: { orderId: string; amount: number; date: string; method: Method }) => Promise<void>;
   onSetStatus: (orderId: string, status: string) => Promise<void>;
 }) {
   const router = useRouter();
@@ -103,9 +101,6 @@ export function RegisterView({
   // Set while billing a load, so the saved order also books the delivery.
   const [fromLoad, setFromLoad] = useState<UnbilledLoad | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [payFor, setPayFor] = useState<RegisterRow | null>(null);
-  const [payAmount, setPayAmount] = useState<number>(0);
-  const [payMethod, setPayMethod] = useState<Method>("cash");
   const [isPending, startTransition] = useTransition();
 
   const set = (patch: Partial<ReturnType<typeof blankDraft>>) =>
@@ -157,22 +152,6 @@ export function RegisterView({
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not save the row");
       }
-    });
-  };
-
-  const submitPay = () => {
-    if (!payFor || payAmount <= 0) return;
-    const row = payFor;
-    startTransition(async () => {
-      await onPay({
-        orderId: row.orderId,
-        amount: payAmount,
-        date: formatISODate(new Date()),
-        method: payMethod,
-      });
-      setPayFor(null);
-      setPayAmount(0);
-      router.refresh();
     });
   };
 
@@ -459,45 +438,6 @@ export function RegisterView({
         </div>
       )}
 
-      {/* Take a payment against a row */}
-      {payFor && (
-        <Card className="border-2 border-emerald-500/40">
-          <div className="text-[13px] font-bold text-ink mb-2">
-            Payment from {payFor.name}{" "}
-            <span className="text-slate-500 font-normal">
-              · balance {formatINR(payFor.balance)}
-            </span>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-2.5">
-            <Field label="Amount ₹">
-              <Input
-                type="number"
-                value={payAmount || ""}
-                onChange={(e) => setPayAmount(Number(e.target.value || 0))}
-                autoFocus
-              />
-            </Field>
-            <Field label="Method">
-              <Select value={payMethod} onChange={(e) => setPayMethod(e.target.value as Method)}>
-                <option value="cash">Cash</option>
-                <option value="gpay">GPay</option>
-                <option value="upi">UPI</option>
-                <option value="bank">Bank</option>
-                <option value="cheque">Cheque</option>
-              </Select>
-            </Field>
-            <div className="flex items-end gap-2">
-              <Button onClick={submitPay} disabled={isPending} variant="primary">
-                {isPending ? "Saving…" : "Record"}
-              </Button>
-              <Button onClick={() => setPayFor(null)} variant="ghost">
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
-
       {rows.length === 0 ? (
         <Card>
           <div className="text-center text-sm text-slate-500 py-8">
@@ -524,7 +464,6 @@ export function RegisterView({
                   <Th align="right">Balance</Th>
                   <Th align="center">Status</Th>
                   <Th>Note</Th>
-                  <Th align="right"></Th>
                 </tr>
               </thead>
               <tbody>
@@ -585,19 +524,6 @@ export function RegisterView({
                     </Td>
                     <Td className="text-slate-500 max-w-[180px] truncate" title={r.notes}>
                       {r.notes || "-"}
-                    </Td>
-                    <Td align="right">
-                      {r.balance > 0 && (
-                        <button
-                          onClick={() => {
-                            setPayFor(r);
-                            setPayAmount(r.balance);
-                          }}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
-                        >
-                          Pay
-                        </button>
-                      )}
                     </Td>
                   </tr>
                 ))}

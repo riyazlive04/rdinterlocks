@@ -69,6 +69,7 @@ export function LoadingMultiForm({
   workers,
   sizes,
   types,
+  priceFor,
   clients,
   orders,
   tippers,
@@ -78,6 +79,8 @@ export function LoadingMultiForm({
   workers: { loaders: WorkerOption[]; operators: WorkerOption[]; employees: WorkerOption[] };
   sizes: Array<{ id: string; label: string }>;
   types: Array<{ id: string; label: string }>;
+  // Sell price per (size × construction type) so the rate fills itself in.
+  priceFor: Record<string, number>;
   clients: ClientOption[];
   orders: OrderOption[];
   tippers: TipperOption[];
@@ -100,6 +103,14 @@ export function LoadingMultiForm({
   // took a name and an advance, so this is where the sale actually gets priced.
   const [saleRate, setSaleRate] = useState<number>(0);
   const [saleTypeId, setSaleTypeId] = useState<string>(types[0]?.id ?? "");
+  // The matrix already knows what this size × type sells for, so offer it and
+  // let the manager overwrite it if the customer agreed something else.
+  const matrixRate = (sizeId: string, typeId: string) => priceFor[`${sizeId}:${typeId}`] ?? 0;
+  const fillRate = (typeId: string) => {
+    const sizeId = lines.find((l) => l.brickCount > 0)?.brickSizeId || lines[0]?.brickSizeId || "";
+    const r = matrixRate(sizeId, typeId);
+    if (r > 0) setSaleRate(r);
+  };
   // Cash handed over at the lorry, on top of anything already advanced.
   const [payNow, setPayNow] = useState<number>(0);
   const [payNowMethod, setPayNowMethod] = useState<"cash" | "gpay" | "bank" | "upi" | "cheque">("cash");
@@ -320,6 +331,13 @@ export function LoadingMultiForm({
     if (showUnload && hasSlabs && unloadSlabRate <= 0) {
       return setError("Enter the unloading rate per slab");
     }
+    // Every load for a real customer has to be billed. Leaving the rate blank
+    // is what left 95 loads and 26,698 bricks sold but never invoiced.
+    if (clientId && clientId !== INTERNAL && !orderId && hasBricks && saleRate <= 0) {
+      return setError(
+        "Enter the rate per brick so this load is billed - or choose 'No customer' if it is an internal move"
+      );
+    }
     if (tipperId && tipperCharge < 0) return setError("Tipper charge can't be negative");
     for (const c of charges) {
       if (!c.name.trim()) return setError("Every charge needs a name (or remove the empty line)");
@@ -510,7 +528,9 @@ export function LoadingMultiForm({
               // Pre-pick the order when the customer has exactly one open —
               // the common case, and the office shouldn't have to think.
               const theirs = orders.filter((o) => o.clientId === next);
-              setOrderId(theirs.length === 1 ? theirs[0].id : "");
+              const one = theirs.length === 1 ? theirs[0].id : "";
+              setOrderId(one);
+              if (!one && next && next !== INTERNAL && saleRate <= 0) fillRate(saleTypeId);
             }}
           >
             <option value="">- choose the customer -</option>
@@ -570,7 +590,13 @@ export function LoadingMultiForm({
                 />
               </Field>
               <Field label="Room / Compound">
-                <Select value={saleTypeId} onChange={(e) => setSaleTypeId(e.target.value)}>
+                <Select
+                  value={saleTypeId}
+                  onChange={(e) => {
+                    setSaleTypeId(e.target.value);
+                    fillRate(e.target.value);
+                  }}
+                >
                   {types.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.label}
@@ -667,9 +693,8 @@ export function LoadingMultiForm({
             </div>
           )}
           {!orderId && saleRate <= 0 && (
-            <div className="text-[11px] mt-1.5 text-amber-700">
-              Leave the rate blank and this stays loading work only - it will show in the Sales
-              register as a load that went out with no order.
+            <div className="text-[11px] mt-1.5 text-brand-red font-semibold">
+              A rate is needed - the load can&apos;t be saved unbilled for a customer.
             </div>
           )}
 
