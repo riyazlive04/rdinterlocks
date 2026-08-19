@@ -14,7 +14,8 @@
     "docs:flow": "node scripts/flow-diagram.mjs",
     "postinstall": "prisma generate",
     "db:stock-check": "tsx prisma/reconcile-stock.ts",
-    "db:prices": "tsx prisma/refresh-price-matrix.ts"
+    "db:prices": "tsx prisma/refresh-price-matrix.ts",
+    "db:check": "tsx prisma/check-schema.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

@@ -212,6 +212,18 @@ npm run db:seed      # wipe + reseed sample data
 npm run db:studio    # open Prisma Studio (browse/edit data)
 ```
 
+### Is the database still complete?
+
+```bash
+npm run db:check
+```
+
+Lists every table and column this release needs and says which are missing.
+Run it after a deploy, or the moment a page returns a server error — twice now
+tables have been dropped out from under the app and the first symptom was a 500
+on `/expense`, `/die`, `/avm`, `/vehicles` and `/tasks`. It prints the exact
+commands to put them back.
+
 ### ⚠️ Never run `prisma db push` from a stale checkout
 
 `db push` makes the database match `schema.prisma` **exactly** — including
