@@ -8,7 +8,6 @@ import { prisma } from "@/lib/db";
 import { distributeInt } from "@/lib/distribute";
 
 const workerType = z.enum(["loader", "operator", "employee"]);
-const loadType = z.enum(["brick", "lintel"]);
 const method = z.enum(["cash", "gpay", "bank", "upi", "cheque"]);
 
 // Map the generic (workerType, workerId) onto the right FK column.
@@ -39,16 +38,16 @@ const chargeSchema = z.object({
 // sharing a loadGroupId so the tipper + charges attach to the load as a whole.
 const crewSchema = z.object({
   workers: z.array(z.object({ type: workerType, id: z.string().min(1) })).min(1),
-  ratePerBrick: z.number().positive(),
+  // 0 is allowed: the crew is recorded for the load but earns no piece rate.
+  ratePerBrick: z.number().nonnegative(),
 });
 const createSchema = z
   .object({
     date: z.string(),
-    loadType: loadType.default("brick"),
     brickSizeId: z.string().optional(),
     clientId: z.string().optional(),
     vehicleRequested: z.string().optional(),
-    brickCount: z.number().int().positive(),
+    brickCount: z.number().int().nonnegative(),
     loading: crewSchema.optional(),
     unloading: crewSchema.optional(),
     // Transport: pick a tipper and what it's charged for this trip. Own tipper
@@ -94,7 +93,7 @@ async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
               tipperId: tipper.id,
               vendorId: tipper.vendorId,
               loadType: "bricks",
-              brickSizeId: p.loadType === "lintel" ? null : p.brickSizeId || null,
+              brickSizeId: p.brickSizeId || null,
               quantity: p.brickCount,
               unit: "pcs",
               toLocation: client?.location ?? null,
@@ -157,11 +156,9 @@ export async function createLoadingWork(input: CreateInput) {
         data: {
           date,
           phase,
-          loadType: p.loadType,
           loadGroupId,
           ...workerData(w.type, w.id),
-          // Lintel slabs aren't a brick size, so never attach one.
-          brickSizeId: p.loadType === "lintel" ? null : p.brickSizeId || null,
+          brickSizeId: p.brickSizeId || null,
           clientId: p.clientId || null,
           tipperId: p.tipperId || null,
           vehicleRequested: p.vehicleRequested?.trim() || null,
@@ -191,12 +188,11 @@ export async function createLoadingWork(input: CreateInput) {
 // Update edits a single existing row (one worker's salary + basics).
 const updateSchema = z.object({
   date: z.string(),
-  loadType: loadType.default("brick"),
   workerType: workerType.default("loader"),
   workerId: z.string().min(1),
   brickSizeId: z.string().optional(),
-  brickCount: z.number().int().positive(),
-  ratePerBrick: z.number().positive(),
+  brickCount: z.number().int().nonnegative(),
+  ratePerBrick: z.number().nonnegative(),
 });
 
 export async function updateLoadingWork(id: string, input: z.infer<typeof updateSchema>) {
@@ -205,9 +201,8 @@ export async function updateLoadingWork(id: string, input: z.infer<typeof update
     where: { id },
     data: {
       date: new Date(p.date),
-      loadType: p.loadType,
       ...workerData(p.workerType, p.workerId),
-      brickSizeId: p.loadType === "lintel" ? null : p.brickSizeId || null,
+      brickSizeId: p.brickSizeId || null,
       brickCount: p.brickCount,
       ratePerBrick: p.ratePerBrick,
       totalAmount: p.brickCount * p.ratePerBrick,

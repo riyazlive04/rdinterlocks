@@ -131,6 +131,14 @@ export async function requireAdmin(): Promise<Session> {
   return s;
 }
 
+// Owner/admin OR manager. Used by the archive console, which the owner and the
+// manager both run — unlike Settings, which stays admin-only.
+export async function requireAdminOrManager(): Promise<Session> {
+  const s = await requireSession();
+  if (!isAdmin(s.role) && s.role !== "manager") redirect("/");
+  return s;
+}
+
 // Username + password login. Matches the name (case-insensitive) AND the
 // password against active users. If name is blank, falls back to matching by
 // password alone (so an empty name field still works). Returns the session.

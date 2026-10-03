@@ -9,7 +9,6 @@ import { distributeInt } from "@/lib/distribute";
 type WorkerType = "loader" | "operator" | "employee";
 type WorkerOption = { type: WorkerType; id: string; name: string };
 type Mode = "loading" | "unloading" | "both";
-type LoadType = "brick" | "lintel";
 type Dir = "in" | "out";
 
 type Crew = { workers: Array<{ type: WorkerType; id: string }>; ratePerBrick: number };
@@ -26,7 +25,6 @@ type ChargeLine = {
 };
 type Sub = {
   date: string;
-  loadType: LoadType;
   brickSizeId?: string;
   clientId?: string;
   vehicleRequested?: string;
@@ -63,7 +61,6 @@ export function LoadingMultiForm({
   const keyOf = (w: WorkerOption) => `${w.type}:${w.id}`;
 
   const [date, setDate] = useState(formatISODate(new Date()));
-  const [loadType, setLoadType] = useState<LoadType>("brick");
   const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
   const [clientId, setClientId] = useState<string>("");
   const [vehicleRequested, setVehicleRequested] = useState<string>("");
@@ -82,9 +79,8 @@ export function LoadingMultiForm({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const isLintel = loadType === "lintel";
-  const unit = isLintel ? "slabs" : "bricks";
-  const unitOne = isLintel ? "slab" : "brick";
+  const unit = "bricks";
+  const unitOne = "brick";
 
   const showLoad = mode !== "unloading";
   const showUnload = mode !== "loading";
@@ -218,11 +214,11 @@ export function LoadingMultiForm({
 
   const submit = () => {
     setError(null);
-    if (brickCount <= 0) return setError(`${isLintel ? "Slab" : "Brick"} count must be more than 0`);
+    if (brickCount < 0) return setError("Brick count can't be negative");
     if (showLoad && loadSel.size === 0) return setError("Pick at least one person who loaded");
-    if (showLoad && loadRate <= 0) return setError("Loading rate must be more than 0");
+    if (showLoad && loadRate < 0) return setError("Loading rate can't be negative");
     if (showUnload && unloadSel.size === 0) return setError("Pick at least one person who unloaded");
-    if (showUnload && unloadRate <= 0) return setError("Unloading rate must be more than 0");
+    if (showUnload && unloadRate < 0) return setError("Unloading rate can't be negative");
     if (tipperId && tipperCharge < 0) return setError("Tipper charge can't be negative");
     for (const c of charges) {
       if (!c.name.trim()) return setError("Every charge needs a name (or remove the empty line)");
@@ -231,8 +227,7 @@ export function LoadingMultiForm({
       try {
         await onSubmit({
           date,
-          loadType,
-          brickSizeId: isLintel ? undefined : brickSizeId || undefined,
+          brickSizeId: brickSizeId || undefined,
           clientId: clientId || undefined,
           vehicleRequested: vehicleRequested.trim() || undefined,
           brickCount,
@@ -289,48 +284,21 @@ export function LoadingMultiForm({
         </div>
       )}
 
-      <Field label="What was handled">
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={() => setLoadType("brick")}
-            className={clsx(
-              "flex-1 px-3 py-2 rounded-lg text-[12px] font-semibold transition",
-              !isLintel ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
-            )}
-          >
-            Bricks
-          </button>
-          <button
-            type="button"
-            onClick={() => setLoadType("lintel")}
-            className={clsx(
-              "flex-1 px-3 py-2 rounded-lg text-[12px] font-semibold transition",
-              isLintel ? "bg-ink text-white" : "bg-white text-slate-700 border border-slate-200"
-            )}
-          >
-            Lintel slabs
-          </button>
-        </div>
-      </Field>
-
-      <div className="grid sm:grid-cols-3 gap-3 mt-3">
+      <div className="grid sm:grid-cols-3 gap-3">
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        {!isLintel && (
-          <Field label="Brick size (optional)">
-            <Select value={brickSizeId} onChange={(e) => setBrickSizeId(e.target.value)}>
-              <option value="">- mixed -</option>
-              {sizes.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
-        <Field label={`Total ${unit}`}>
+        <Field label="Brick size (optional)">
+          <Select value={brickSizeId} onChange={(e) => setBrickSizeId(e.target.value)}>
+            <option value="">- mixed -</option>
+            {sizes.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label={`Total ${unit}`} hint="0 for a slabs-only trip - bill the slabs as a charge below.">
           <Input
             type="number"
             value={brickCount || ""}

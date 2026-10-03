@@ -402,7 +402,9 @@ model LoadingWork {
   id           String   @id @default(cuid())
   date         DateTime @default(now())
   phase        String   @default("loading") // loading | unloading
-  loadType     String   @default("brick") // brick | lintel (lintel slabs)
+  // Historical only: loading labour is brick-only now. Old rows may still
+  // hold "lintel"; lintel slabs are billed as a LoadingCharge add-on instead.
+  loadType     String   @default("brick") // brick | lintel (legacy)
   workerType   String   @default("loader") // loader | operator | employee
   // One physical load splits into several rows (one per worker / phase). They
   // share a loadGroupId so the tipper, add-on charges and cash entries can be
@@ -799,4 +801,30 @@ model CashEntry {
   loadingCharge LoadingCharge?
 
   @@index([date])
+}
+
+// ─── Archive / backup ──────────────────────────────────────────────────
+
+// A full snapshot of every table, taken when a manager or owner hides the
+// books for a fresh start. Taking one serialises the data into `payload` and
+// then clears the live tables, so every screen reads empty while nothing is
+// actually lost; restoring re-inserts the rows exactly as they were.
+//
+// User, Settings and ArchiveBatch are never archived - the factory must still
+// be able to log in, the app reads the Settings singleton on every page, and
+// this table is where the backup lives. Settings.cashOpening IS zeroed (a
+// stale opening balance against an empty cashbook would show phantom cash);
+// its old value travels in the snapshot and comes back on restore.
+model ArchiveBatch {
+  id         String    @id @default(cuid())
+  label      String    @default("")
+  createdAt  DateTime  @default(now())
+  createdBy  String    @default("")
+  totalRows  Int       @default(0)
+  rowCounts  String    @default("{}") // JSON: { modelName: rowCount }
+  payload    String // JSON snapshot of every archived table
+  restoredAt DateTime?
+  restoredBy String?
+
+  @@index([createdAt])
 }

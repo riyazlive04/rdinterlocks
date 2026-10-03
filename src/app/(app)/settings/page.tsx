@@ -49,6 +49,12 @@ const sections: Array<{
       { href: "/settings/material-stock", label: "Raw material stock", sub: "On-hand qty, reorder, add received", icon: "Stack" },
     ],
   },
+  {
+    group: "Data",
+    items: [
+      { href: "/archive", label: "Hide data & backups", sub: "Clear the books for a fresh start - nothing is lost", icon: "Download" },
+    ],
+  },
 ];
 
 export default async function SettingsHub() {
