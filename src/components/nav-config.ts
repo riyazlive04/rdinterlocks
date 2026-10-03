@@ -140,19 +140,14 @@ export const primaryNav: NavItem[] = [
     matches: ["/guide"],
   },
   {
-    id: "archive",
-    label: "Hide data & backups",
-    href: "/archive",
-    icon: "Download",
-    matches: ["/archive"],
-    adminOrManager: true,
-  },
-  {
     id: "settings",
     label: "Settings",
     href: "/settings",
     icon: "Settings",
     matches: ["/settings"],
+    // A manager sees Settings too, but the hub shows them only the Data
+    // group (hide data & backups) — every other group stays admin-only.
+    adminOrManager: true,
   },
 ];
 

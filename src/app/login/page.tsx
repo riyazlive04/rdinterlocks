@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Footer } from "@/components/footer";
 import Image from "next/image";
 import { getSession } from "@/lib/auth";
 
@@ -61,6 +62,7 @@ export default async function LoginPage({
             </button>
           </form>
         </div>
+        <Footer bare />
       </div>
     </div>
   );

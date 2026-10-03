@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui";
 import { Icon, IconName } from "@/components/icons";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminOrManager } from "@/lib/auth";
+import { isAdmin } from "@/lib/access";
 
 const sections: Array<{
   group: string;
@@ -58,15 +59,19 @@ const sections: Array<{
 ];
 
 export default async function SettingsHub() {
-  await requireAdmin();
+  // Managers get in, but only for the Data group — hiding the books is
+  // theirs to run; master data is not.
+  const session = await requireAdminOrManager();
+  const admin = isAdmin(session.role);
+  const visible = admin ? sections : sections.filter((s) => s.group === "Data");
   return (
     <>
       <PageHeader
         title="Settings"
-        sub="Master data - admin can add or change anything"
+        sub={admin ? "Master data - admin can add or change anything" : "Hide the books for a fresh start"}
       />
       <div className="space-y-6">
-        {sections.map((s) => (
+        {visible.map((s) => (
           <div key={s.group}>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 px-1">
               {s.group}
