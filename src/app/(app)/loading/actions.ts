@@ -55,13 +55,15 @@ const itemSchema = z.object({
 const crewSchema = z.object({
   workers: z.array(z.object({ type: workerType, id: z.string().min(1) })).min(1),
   ratePerBrick: z.number().nonnegative(),
-  ratePerSlab: z.number().nonnegative().default(0),
 });
 const createSchema = z
   .object({
     date: z.string(),
     items: z.array(itemSchema).default([]),
     slabCount: z.number().int().nonnegative().default(0),
+    // What the CUSTOMER pays per beam. Beams are sold, not crew-paid work,
+    // so this never reaches a wage — it becomes a charge on the load.
+    slabRate: z.number().nonnegative().default(0),
     clientId: z.string().optional(),
     // When the trip is against a customer's open order, the bricks that left
     // the yard are booked as a Delivery on it. Blank = wages only.
@@ -376,6 +378,23 @@ async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
   await wireTipper(p, loadGroupId, date, client);
   await wireDelivery(p, loadGroupId, date);
 
+  // Lintel beams are sold to the customer, never paid to the crew. The beam
+  // count x the agreed rate joins the add-on charges below, so it lands on the
+  // client page and in the cash book exactly like a shifting or cement line.
+  const beamCharge =
+    p.slabCount > 0 && p.slabRate > 0
+      ? [
+          {
+            name: "Lintel beams",
+            direction: "in" as const,
+            quantity: p.slabCount,
+            unit: "pcs",
+            amount: p.slabCount * p.slabRate,
+            vendorId: undefined,
+          },
+        ]
+      : [];
+
   // Every add-on charge (shifting, lintel beam, cement, custom) becomes real
   // money, both ways round:
   //
@@ -385,7 +404,7 @@ async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
   //                           named after the charge, so it appears in the
   //                           Expense screen and report and not only in the
   //                           cash book
-  for (const c of p.charges) {
+  for (const c of [...p.charges, ...beamCharge]) {
     if (c.amount <= 0) continue;
     const out = c.direction === "out";
     const vendor =
@@ -443,10 +462,10 @@ export async function createLoadingWork(input: CreateInput) {
   const date = new Date(p.date);
   const loadGroupId = randomUUID();
 
-  // A crew is paid for everything it handled on the trip: a row per brick size
-  // and, when the lorry also carried slabs, one more row at the slab rate. The
-  // slab rows keep loadType "lintel" so reports can still tell them apart even
-  // though they were entered together.
+  // A crew is paid per brick size. Lintel beams are billed to the customer
+  // instead of paid to the crew, so a beam row is still written — the crew
+  // did carry them, and the Loading report counts beams in their own column —
+  // but at rate 0, so it adds nothing to anyone's pay.
   const rowsFor = (crew: z.infer<typeof crewSchema>, phase: "loading" | "unloading") => {
     const common = {
       date,
@@ -486,8 +505,9 @@ export async function createLoadingWork(input: CreateInput) {
           // A slab is not a brick size, so never attach one.
           brickSizeId: null,
           brickCount: slabShares[i],
-          ratePerBrick: crew.ratePerSlab,
-          totalAmount: slabShares[i] * crew.ratePerSlab,
+          // Recorded, not paid: the beams are on the customer's bill.
+          ratePerBrick: 0,
+          totalAmount: 0,
         },
       })
     );

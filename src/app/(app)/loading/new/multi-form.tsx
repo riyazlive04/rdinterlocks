@@ -14,7 +14,6 @@ type Dir = "in" | "out";
 type Crew = {
   workers: Array<{ type: WorkerType; id: string }>;
   ratePerBrick: number;
-  ratePerSlab: number;
 };
 type ClientOption = { id: string; name: string; location?: string; advance: number };
 type OrderOption = {
@@ -43,6 +42,8 @@ type Sub = {
   vehicleRequested?: string;
   items: Array<{ brickSizeId?: string; brickCount: number }>;
   slabCount: number;
+  // What the customer pays per beam. Beams are sold, not crew-paid.
+  slabRate: number;
   orderId?: string;
   saleRate?: number;
   constructionTypeId?: string;
@@ -97,6 +98,9 @@ export function LoadingMultiForm({
     { brickSizeId: sizes[0]?.id ?? "", brickCount: 1000 },
   ]);
   const [slabCount, setSlabCount] = useState<number>(0);
+  // Beams are billed to the customer, not paid to the crew, so the rate
+  // belongs to the trip rather than to either crew.
+  const [slabRate, setSlabRate] = useState<number>(0);
   const [clientId, setClientId] = useState<string>("");
   const [orderId, setOrderId] = useState<string>("");
   // Rate agreed with the customer when the lorry is loaded. The telecaller only
@@ -123,10 +127,8 @@ export function LoadingMultiForm({
   const [mode, setMode] = useState<Mode>("loading");
   const [loadSel, setLoadSel] = useState<Set<string>>(new Set());
   const [loadRate, setLoadRate] = useState<number>(0.5);
-  const [loadSlabRate, setLoadSlabRate] = useState<number>(0);
   const [unloadSel, setUnloadSel] = useState<Set<string>>(new Set());
   const [unloadRate, setUnloadRate] = useState<number>(0.5);
-  const [unloadSlabRate, setUnloadSlabRate] = useState<number>(0);
 
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -243,12 +245,12 @@ export function LoadingMultiForm({
     );
   };
 
-  // Bricks and slabs are split across the crew separately, because they are
-  // paid at different rates, then added up per worker.
-  const crewTotal = (rate: number, slabRate: number) =>
-    Math.round(brickCount * (rate || 0) + slabCount * (slabRate || 0));
+  // Only the bricks earn a wage. Beams are still split across the crew and
+  // shown, because they did carry them, but they are billed to the customer
+  // instead of paid out — so they add nothing to the Salary column.
+  const crewTotal = (rate: number) => Math.round(brickCount * (rate || 0));
 
-  const splitTable = (sel: Set<string>, rate: number, slabRate: number) => {
+  const splitTable = (sel: Set<string>, rate: number) => {
     const sw = workersFor(sel);
     if (sw.length === 0) return null;
     const bricksSplit = distributeInt(brickCount || 0, sw.length);
@@ -274,7 +276,7 @@ export function LoadingMultiForm({
                   {hasBricks && <td className="px-3 py-2 text-right num">{formatNumber(b)}</td>}
                   {hasSlabs && <td className="px-3 py-2 text-right num">{formatNumber(s)}</td>}
                   <td className="px-3 py-2 text-right num font-semibold">
-                    {formatINR(Math.round(b * (rate || 0) + s * (slabRate || 0)))}
+                    {formatINR(Math.round(b * (rate || 0)))}
                   </td>
                 </tr>
               );
@@ -288,7 +290,7 @@ export function LoadingMultiForm({
                 <td className="px-3 py-2 text-right num font-bold">{formatNumber(slabCount)}</td>
               )}
               <td className="px-3 py-2 text-right num font-bold">
-                {formatINR(crewTotal(rate, slabRate))}
+                {formatINR(crewTotal(rate))}
               </td>
             </tr>
           </tbody>
@@ -298,12 +300,10 @@ export function LoadingMultiForm({
   };
 
   const grandTotal = useMemo(() => {
-    const load = showLoad ? Math.round(brickCount * (loadRate || 0) + slabCount * (loadSlabRate || 0)) : 0;
-    const unload = showUnload
-      ? Math.round(brickCount * (unloadRate || 0) + slabCount * (unloadSlabRate || 0))
-      : 0;
+    const load = showLoad ? Math.round(brickCount * (loadRate || 0)) : 0;
+    const unload = showUnload ? Math.round(brickCount * (unloadRate || 0)) : 0;
     return load + unload;
-  }, [brickCount, slabCount, loadRate, loadSlabRate, unloadRate, unloadSlabRate, showLoad, showUnload]);
+  }, [brickCount, loadRate, unloadRate, showLoad, showUnload]);
 
   const submit = () => {
     setError(null);
@@ -321,15 +321,14 @@ export function LoadingMultiForm({
     }
     if (showLoad && loadSel.size === 0) return setError("Pick at least one person who loaded");
     if (showLoad && hasBricks && loadRate <= 0) return setError("Loading rate must be more than 0");
-    if (showLoad && hasSlabs && loadSlabRate <= 0) {
-      return setError("Enter the loading rate per slab");
-    }
     if (showUnload && unloadSel.size === 0) return setError("Pick at least one person who unloaded");
     if (showUnload && hasBricks && unloadRate <= 0) {
       return setError("Unloading rate must be more than 0");
     }
-    if (showUnload && hasSlabs && unloadSlabRate <= 0) {
-      return setError("Enter the unloading rate per slab");
+    // Beams go on the customer's bill, so they need a price for the same
+    // reason a brick load does — a blank rate is an unbilled beam.
+    if (hasSlabs && clientId && clientId !== INTERNAL && slabRate <= 0) {
+      return setError("Enter the rate per beam so the lintel beams are billed");
     }
     // Every load for a real customer has to be billed. Leaving the rate blank
     // is what left 95 loads and 26,698 bricks sold but never invoiced.
@@ -352,6 +351,7 @@ export function LoadingMultiForm({
             .filter((l) => l.brickCount > 0)
             .map((l) => ({ brickSizeId: l.brickSizeId || undefined, brickCount: l.brickCount })),
           slabCount,
+          slabRate: hasSlabs && slabRate > 0 ? slabRate : 0,
           orderId: orderId || undefined,
           saleRate: !orderId && saleRate > 0 ? saleRate : 0,
           constructionTypeId: !orderId ? saleTypeId || undefined : undefined,
@@ -361,14 +361,12 @@ export function LoadingMultiForm({
             ? {
                 workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })),
                 ratePerBrick: loadRate,
-                ratePerSlab: loadSlabRate,
               }
             : undefined,
           unloading: showUnload
             ? {
                 workers: workersFor(unloadSel).map((w) => ({ type: w.type, id: w.id })),
                 ratePerBrick: unloadRate,
-                ratePerSlab: unloadSlabRate,
               }
             : undefined,
           tipperId: tipperId || undefined,
@@ -490,14 +488,24 @@ export function LoadingMultiForm({
                 On the same lorry - leave 0 if none
               </div>
             </div>
-            <div className="col-span-6 sm:col-span-5">
-              <Field label="Slabs">
+            <div className="col-span-6 sm:col-span-5 grid grid-cols-2 gap-2">
+              <Field label="Beams">
                 <Input
                   type="number"
                   value={slabCount || ""}
                   onChange={(e) => setSlabCount(Number(e.target.value || 0))}
                 />
               </Field>
+              {hasSlabs && (
+                <Field label="Rate ₹/beam" hint="Charged to the customer">
+                  <Input
+                    type="number"
+                    step="0.5"
+                    value={slabRate || ""}
+                    onChange={(e) => setSlabRate(Number(e.target.value || 0))}
+                  />
+                </Field>
+              )}
             </div>
           </div>
         </div>
@@ -716,8 +724,8 @@ export function LoadingMultiForm({
           )}
           {hasSlabs && (
             <div className="text-[11px] mt-1 text-slate-500">
-              The {formatNumber(slabCount)} lintel beams stay as loading work - beams are priced on
-              their own order lines, not delivered as bricks.
+              The {formatNumber(slabCount)} lintel beams are billed to the customer as a charge on
+              this load, not delivered as bricks and not paid to the crew.
             </div>
           )}
         </div>
@@ -896,22 +904,10 @@ export function LoadingMultiForm({
                   />
                 </Field>
               </div>
-              {hasSlabs && (
-                <div className="w-28">
-                  <Field label="Rate ₹/slab">
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={loadSlabRate || ""}
-                      onChange={(e) => setLoadSlabRate(Number(e.target.value || 0))}
-                    />
-                  </Field>
-                </div>
-              )}
             </div>
           </div>
           {groupSelector(loadSel, toggle(setLoadSel))}
-          {splitTable(loadSel, loadRate, loadSlabRate)}
+          {splitTable(loadSel, loadRate)}
         </div>
       )}
 
@@ -932,18 +928,6 @@ export function LoadingMultiForm({
                   />
                 </Field>
               </div>
-              {hasSlabs && (
-                <div className="w-28">
-                  <Field label="Rate ₹/slab">
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={unloadSlabRate || ""}
-                      onChange={(e) => setUnloadSlabRate(Number(e.target.value || 0))}
-                    />
-                  </Field>
-                </div>
-              )}
             </div>
           </div>
           {mode === "both" && (
@@ -952,7 +936,7 @@ export function LoadingMultiForm({
             </div>
           )}
           {groupSelector(unloadSel, toggle(setUnloadSel))}
-          {splitTable(unloadSel, unloadRate, unloadSlabRate)}
+          {splitTable(unloadSel, unloadRate)}
         </div>
       )}
 

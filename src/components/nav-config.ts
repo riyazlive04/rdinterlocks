@@ -9,6 +9,8 @@ export type NavItem = {
   matches?: string[];
   area?: string; // access area key; undefined = visible to all logged-in users
   adminOnly?: boolean;
+  // Owner/admin OR manager. Used by the archive console, which both run.
+  adminOrManager?: boolean;
 };
 
 export const primaryNav: NavItem[] = [
@@ -138,6 +140,14 @@ export const primaryNav: NavItem[] = [
     matches: ["/guide"],
   },
   {
+    id: "archive",
+    label: "Hide data & backups",
+    href: "/archive",
+    icon: "Download",
+    matches: ["/archive"],
+    adminOrManager: true,
+  },
+  {
     id: "settings",
     label: "Settings",
     href: "/settings",
@@ -168,6 +178,7 @@ const ALWAYS_VISIBLE = new Set(["home", "tasks", "guide", "more"]);
 // doubles as its access-area key; "settings" is admin-only.
 export function visibleNav(items: NavItem[], user: AccessUser): NavItem[] {
   return items.filter((it) => {
+    if (it.adminOrManager) return isAdmin(user.role) || user.role === "manager";
     if (it.id === "settings" || it.adminOnly) return isAdmin(user.role);
     if (ALWAYS_VISIBLE.has(it.id)) return true;
     return can(user, it.area ?? it.id);
