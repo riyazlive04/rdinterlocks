@@ -188,10 +188,38 @@ export async function replayDelivery(
   try {
     const delivery = await prisma.leadWebhookDelivery.findUnique({
       where: { id: deliveryId },
-      select: { id: true, channel: true, body: true },
+      select: { id: true, channel: true, body: true, statusCode: true, status: true },
     });
     if (!delivery) {
       return { ok: false, outcome: "error", message: "That delivery no longer exists." };
+    }
+
+    // NEVER replay a delivery that failed authentication.
+    //
+    // The route stores the raw body BEFORE it verifies the signature, so an
+    // unsigned or wrongly-signed request is still persisted — deliberately,
+    // because that row is the only place a provider's broken signing is
+    // visible. The consequence is that anyone on the internet who guesses a
+    // channel slug can park an arbitrary lead payload in this table, where
+    // it appears beside genuine traffic. Replaying it would import that
+    // forgery as a real provider submission, attributed to whichever
+    // operator clicked the button, and from there it is auto-assigned,
+    // possibly auto-quoted, and its phone number becomes a valid target for
+    // the factory's WhatsApp sender.
+    //
+    // Replay exists for deliveries WE could not complete (a Graph outage, a
+    // bad field map, a bug in the importer) — those were authenticated on
+    // arrival. Authentication is the one thing a replay cannot re-establish,
+    // since the timestamp window has passed and the secret may have rotated,
+    // so a row that never passed it is refused outright rather than trusted.
+    if (delivery.statusCode === 401 || delivery.statusCode === 408) {
+      return {
+        ok: false,
+        outcome: "error",
+        message:
+          "This delivery was refused because its signature did not verify, so it cannot be replayed — " +
+          "nothing proves who sent it. Ask the provider to re-send it correctly signed.",
+      };
     }
 
     // Read the channel list fresh rather than trusting the name on the row:

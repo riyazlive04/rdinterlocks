@@ -11,7 +11,9 @@ export async function POST(req: Request) {
   const name = String(form.get("name") ?? "").trim();
   const password = String(form.get("password") ?? "").trim();
 
-  if (!password) {
+  // Both fields, not just the password. A blank name used to reach
+  // verifyLogin's password-only path and match against every active user.
+  if (!name || !password) {
     return NextResponse.redirect(new URL("/login?error=missing", req.url), 303);
   }
 

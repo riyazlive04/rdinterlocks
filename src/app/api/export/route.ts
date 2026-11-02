@@ -9,12 +9,51 @@ import { drawPdfLetterhead, drawXlsxLetterhead } from "@/lib/pdf-letterhead";
 
 export const runtime = "nodejs";
 
+// Report kinds whose rows carry money the `revenue` area exists to hide:
+// the cashbook is every CashEntry with a running balance, wages is per-person
+// pay, and sales/expense carry amounts in their own columns. `includeRevenue`
+// below is honoured only by the `leads` report, so it cannot stand in for a
+// gate on these.
+const REVENUE_KINDS = new Set<ReportKind>(["cashbook", "wages", "sales", "expense"]);
+
+const VALID_KINDS: ReportKind[] = [
+  "production",
+  "sales",
+  "expense",
+  "tipper",
+  "mason",
+  "loading",
+  "wages",
+  "cashbook",
+  "leads",
+];
+
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  // Seeing a report at all requires the `reports` area, exactly as the page
+  // does (reports/page.tsx). This route only checked that SOMEBODY was signed
+  // in, which was survivable while every account was an admin — the four-role
+  // hierarchy introduced principals who are deliberately denied reports, and
+  // a telecaller could fetch kind=cashbook straight from the URL and read the
+  // whole cashbook the UI withholds from them.
+  if (!can(session, "reports")) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
   const sp = req.nextUrl.searchParams;
-  const kind = (sp.get("kind") ?? "production") as ReportKind;
+  // Validated against the known set rather than cast, so an unknown kind
+  // cannot slip past the revenue check below on its way into getReportData.
+  const requestedKind = sp.get("kind") ?? "production";
+  if (!VALID_KINDS.includes(requestedKind as ReportKind)) {
+    return NextResponse.json({ error: "unknown report kind" }, { status: 400 });
+  }
+  const kind = requestedKind as ReportKind;
+
+  if (REVENUE_KINDS.has(kind) && !can(session, "revenue")) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const format = sp.get("format") ?? "xlsx";
   const fromStr = sp.get("from");
   const toStr = sp.get("to");

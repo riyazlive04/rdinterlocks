@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { can } from "@/lib/access";
+import { isFullAccess } from "@/lib/roles";
 import { getQuotationPdf } from "@/lib/quote-document";
 
 // GET /api/quote/[id]/pdf
@@ -41,15 +42,32 @@ export const maxDuration = 30; // Chromium launch + render can take a few second
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const mayReadDocument =
-    can(session, "quoteReview") ||
-    can(session, "quoteSend") ||
-    (can(session, "quotations") && can(session, "revenue"));
-  if (!mayReadDocument) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-
   const { id } = await params;
-  const quotation = await prisma.quotation.findUnique({ where: { id }, select: { number: true } });
+  const quotation = await prisma.quotation.findUnique({
+    where: { id },
+    select: { number: true, status: true, submittedByUserId: true },
+  });
   if (!quotation) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // Unrestricted: owner/manager, and anyone holding the money-document pair
+  // the generating actions require.
+  const unrestricted = isFullAccess(session.role) || (can(session, "quotations") && can(session, "revenue"));
+
+  // A reviewer or sender holds their area INSTEAD of `revenue`, so the area
+  // alone opens the priced document — otherwise they would be approving and
+  // sending a file they were forbidden to read. But it opens it only for
+  // quotations their queue actually covers: anything that has left `draft`,
+  // plus their own drafts. Both queues are shared on purpose (whoever is
+  // free reviews or sends the next one), so scoping to "quotations you
+  // personally touched" would break them; scoping by state does not, while
+  // still keeping a colleague's unsent draft out of reach.
+  const inAQueue = quotation.status !== "draft";
+  const isTheirs = !!quotation.submittedByUserId && quotation.submittedByUserId === session.userId;
+  const viaQueue = (can(session, "quoteReview") || can(session, "quoteSend")) && (inAQueue || isTheirs);
+
+  if (!unrestricted && !viaQueue) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const doc = await getQuotationPdf(id);
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });

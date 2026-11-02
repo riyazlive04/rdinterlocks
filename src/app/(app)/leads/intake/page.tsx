@@ -39,9 +39,17 @@ const STATUS_TONES: Record<string, "slate" | "success" | "info" | "warning" | "d
   failed: "red",
 };
 
-// Only these two are worth re-running: `imported` and `duplicate` already did
+// Only `failed` is worth re-running: `imported` and `duplicate` already did
 // their job, and `pending` means the live request is still in flight.
-const REPLAYABLE = new Set(["failed", "rejected"]);
+//
+// `rejected` is deliberately NOT here. A delivery is rejected either because
+// its signature did not verify — in which case nothing proves who sent it,
+// and the body in that row may be a forgery parked there by anyone who
+// guessed the channel slug — or because the payload was unusable, which a
+// replay of the same bytes cannot fix. replayDelivery() refuses those rows
+// server-side regardless of what this list says; this only keeps the UI from
+// offering a button that is guaranteed to fail.
+const REPLAYABLE = new Set(["failed"]);
 
 export default async function LeadIntakePage({
   searchParams,

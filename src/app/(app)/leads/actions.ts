@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { requireArea } from "@/lib/auth";
 import { convertLeadCore, type ConvertInput } from "@/lib/lead-convert";
 import { resolveStageBySlug, triggerWaSequencesForStage } from "@/lib/lead-stage";
+import { isFullAccess } from "@/lib/roles";
 
 // Office-side lead handling. The import endpoint writes leads in; everything
 // here is a human acting on one afterwards — correcting a bad extraction,
@@ -240,6 +241,29 @@ export async function assignLead(leadId: string, userId: string | null) {
       ? await tx.user.findUnique({ where: { id: userId }, select: { name: true, active: true } })
       : null;
     if (userId && (!owner || !owner.active)) throw new Error("That user is not available.");
+
+    // Who may move a lead between people.
+    //
+    // Owner/manager may place any lead with anyone. Everybody else may only
+    // claim a lead nobody holds, or put their own back in the pool — they
+    // cannot take one off a colleague, and cannot hand one to a third party.
+    //
+    // This is a real authorization boundary, not tidiness. Quotation review
+    // is routed to the lead's owner (Settings.quoteReviewByOwner), so with
+    // an unrestricted assignLead a telecaller could reassign any colleague's
+    // lead to themselves and then approve the quotation that was routed away
+    // from them — one call, and the separation the review gate exists to
+    // create is gone. It also stopped anyone quietly taking another
+    // telecaller's work.
+    if (!isFullAccess(session.role)) {
+      const takingFromSomeoneElse = !!lead.ownerUserId && lead.ownerUserId !== session.userId;
+      if (takingFromSomeoneElse) {
+        throw new Error("This lead belongs to someone else — ask a manager to reassign it.");
+      }
+      if (userId && userId !== session.userId) {
+        throw new Error("You can only take a lead yourself — a manager assigns work to others.");
+      }
+    }
 
     await tx.lead.update({ where: { id: leadId }, data: { ownerUserId: userId } });
     // The note spells the destination out in words rather than leaning on a
