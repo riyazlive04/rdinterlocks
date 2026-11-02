@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { PageHeader, Card } from "@/components/ui";
 import { DaySheet } from "./sheet";
 import { createDailyProduction } from "../production/actions";
 
 export default async function DaySheetPage() {
+  await requireArea("day");
   const [sizes, operators, machines, settings] = await Promise.all([
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
     prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),

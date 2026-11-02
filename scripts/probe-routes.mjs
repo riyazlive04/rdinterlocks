@@ -66,6 +66,13 @@ const routes = [
   "/settings/employees",
   "/settings/vendors",
   "/settings/tippers",
+  // Lead intake, the quotation review gate and the send list.
+  "/leads/intake",
+  "/leads/board",
+  "/quotations/review",
+  "/quotations/send",
+  "/settings/automation",
+  "/settings/quote-content",
 ].filter(Boolean);
 
 let failures = 0;

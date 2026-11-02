@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui";
 import { EditClientForm } from "./form";
@@ -9,6 +10,7 @@ export default async function EditClientPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireArea("sales");
   const { id } = await params;
   const client = await prisma.client.findUnique({ where: { id } });
   if (!client) notFound();

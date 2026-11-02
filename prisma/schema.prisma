@@ -21,6 +21,11 @@ model User {
 
   assignedTasks Task[] @relation("TaskAssignee")
   createdTasks  Task[] @relation("TaskCreator")
+
+  ownedLeads        Lead[]          @relation("LeadOwner")
+  leadActivities    LeadActivity[]
+  submittedQuotes   Quotation[]     @relation("QuoteSubmitter")
+  reviewedQuotes    Quotation[]     @relation("QuoteReviewer")
 }
 
 // A to-do the admin assigns to another user (manager / telecaller / staff).
@@ -37,6 +42,11 @@ model Task {
   status       String    @default("open") // open | done
   createdAt    DateTime  @default(now())
   completedAt  DateTime?
+  // Why a task was put in its current status — set when it is parked or
+  // reopened rather than completed. Present in the production database
+  // before it was ever declared here; see the Dies section below for why
+  // this schema was reconciled to the database rather than the reverse.
+  statusReason String?
 
   @@index([assignedToId])
   @@index([status])
@@ -50,6 +60,7 @@ model Settings {
   ownerName       String  @default("Admin")
   address         String  @default("")
   phone           String  @default("")
+  email           String  @default("")
   gstin           String  @default("")
   cementBagsPer1000 Float @default(18) // recipe ratio, for material reconciliation
   materialBasis   Int     @default(1000) // recipe quantities are "per this many bricks"
@@ -68,6 +79,68 @@ model Settings {
   operatorPayFreq String  @default("weekly")
   loaderPayFreq   String  @default("weekly")
   masonPayFreq    String  @default("weekly")
+  // WhatsApp nurturing guardrails, enforced in lib/whatsapp-send.ts (not the
+  // UI). Hours are 24h clock, IST (this factory has one timezone; no
+  // per-user zone handling). waQuietHoursStart..24 and 0..waQuietHoursEnd are
+  // both quiet when the range wraps past midnight (e.g. 21 -> 9).
+  waQuietHoursStart Int @default(21)
+  waQuietHoursEnd   Int @default(9)
+  waDailyCapPerLead Int @default(3)
+
+  // Quotation PDF boilerplate — admin-editable so wording changes (delivery
+  // days, T&C, scope) don't need a code deploy. Bullet lists are stored one
+  // item per line. Populated by prisma/seed-quote-settings.ts from the
+  // reference letterhead; left blank means that section renders empty.
+  quoteAddressTa     String @default("") // Tamil rendering of the factory address block
+  quoteTermsEn       String @default("")
+  quoteTermsTa       String @default("")
+  quoteOurScopeEn    String @default("")
+  quoteOurScopeTa    String @default("")
+  quoteClientScopeEn String @default("")
+  quoteClientScopeTa String @default("")
+  // UPI payment details for the dynamic QR shown on each quotation. Encodes
+  // a upi://pay deep link with the quote's exact amount at generation time —
+  // never a static image, so it can't go stale if the ID changes.
+  quoteUpiId         String @default("") // VPA, e.g. "8870714655@ybl"
+  quoteUpiPayeeName  String @default("")
+  // Proprietor's signature, uploaded from Settings -> Quotation content and
+  // stored as a base64 data: URL directly in the row (same pattern the PDF
+  // route already uses for public/logo.png) rather than a file on disk —
+  // Vercel's serverless filesystem is ephemeral, so an uploaded file saved
+  // to disk would not survive past the request that wrote it.
+  quoteSignatureImage String @default("")
+
+  // ─── Quotation review + automation ────────────────────────────────
+  // Every flag here defaults to TODAY'S behaviour, so none of this changes
+  // how the desk works until an admin turns it on.
+
+  /// When true, a quotation must be submitted for review and approved before
+  /// it can be sent, and the reviewed PDF is frozen at submission. False
+  /// keeps the original draft -> sent path.
+  quoteReviewRequired Boolean @default(false)
+  /// Route a review to the lead's owner (the person who spoke to the
+  /// customer) rather than to whoever opens the queue. Falls back to anyone
+  /// holding the quoteReview area when the lead has no owner.
+  quoteReviewByOwner  Boolean @default(true)
+
+  /// Auto-draft a quotation when a lead reaches `autoQuoteOnStage` with
+  /// enough data to price. The draft always lands in the review queue —
+  /// nothing is ever auto-SENT, which is the line this feature does not
+  /// cross.
+  autoQuoteEnabled      Boolean @default(false)
+  /// LeadStage.slug that triggers the auto-draft.
+  autoQuoteOnStage      String  @default("qualified")
+  /// Require a resolvable delivery zone before auto-drafting. On by default:
+  /// a quote priced from the flat matrix when the customer is 40km away is
+  /// worse than no quote, because someone has to notice before it is sent.
+  autoQuoteRequiresZone Boolean @default(true)
+
+  /// off | round-robin — how a newly ingested lead gets an owner.
+  leadAutoAssign Boolean @default(false)
+
+  /// Days after `quoteDate` that an unanswered sent quotation is marked
+  /// expired by the sweep. 0 disables expiry.
+  quoteExpiryDays Int @default(0)
 }
 
 model Machine {
@@ -77,6 +150,58 @@ model Machine {
   order  Int     @default(0)
 
   productionEntries ProductionEntry[]
+}
+
+// ─── Dies (moulds) ─────────────────────────────────────────────────────
+//
+// These two models were RECONCILED FROM the production database rather than
+// authored here: the tables exist live, with data, but had never been
+// declared in this schema and no application code references them yet.
+// Because `prisma db push` is this project's only migration path, an
+// undeclared table is not merely undocumented — the next push would have
+// silently issued DROP TABLE for both. They are declared here so push stays
+// additive. Field names, types, defaults and indexes therefore mirror the
+// live tables exactly; do not "tidy" them without running
+// `prisma migrate diff` first to confirm the push is still a no-op.
+//
+// The domain: a die is the steel mould a machine presses bricks with. It
+// wears out, so each one is tracked by cost and vendor for depreciation, and
+// a die has two usable sides — DieUsage records the interval each side was in
+// service, which is what makes "how many bricks did this mould give us"
+// answerable.
+
+model Die {
+  id          String     @id @default(cuid())
+  code        String     @unique // stamped/handwritten identifier on the die itself
+  brickSizeId String?
+  brickSize   BrickSize? @relation(fields: [brickSizeId], references: [id])
+  cost        Float      @default(0)
+  purchasedAt DateTime   @default(now())
+  vendorId    String?
+  vendor      Vendor?    @relation(fields: [vendorId], references: [id])
+  notes       String?
+  // Links the purchase to its Expense row. Deliberately an unconstrained
+  // column (no FK in the live table, same shape as Expense.tipperId) — kept
+  // as-is so declaring it does not add a constraint the database lacks.
+  expenseId   String?    @unique
+  createdAt   DateTime   @default(now())
+
+  usages DieUsage[]
+
+  @@index([purchasedAt])
+}
+
+model DieUsage {
+  id        String    @id @default(cuid())
+  dieId     String
+  die       Die       @relation(fields: [dieId], references: [id], onDelete: Cascade)
+  side      Int // 1 or 2 — a die is pressed on both faces before it is scrapped
+  startedAt DateTime  @default(now())
+  endedAt   DateTime? // null = this side is the one currently in service
+  notes     String?
+
+  @@unique([dieId, side])
+  @@index([startedAt])
 }
 
 // Material recipe per brick size: how many units of each material per 1000 bricks
@@ -105,6 +230,10 @@ model BrickSize {
   id    String @id @default(cuid())
   label String @unique // e.g. "6\"", "6\"H", "8\""
   order Int    @default(0)
+  // Physical dimensions, e.g. "10.5*5*6" — shown in quotation item names
+  // as "<label> Interlock Bricks(<dimensions>)", matching the reference
+  // letterhead. Blank means the item name is shown without the suffix.
+  dimensions String @default("")
   // Operator piece-rate for this size by shift. 0 = fall back to the global
   // day/night rate in Settings.
   dayRate   Float @default(0)
@@ -120,6 +249,10 @@ model BrickSize {
   tipperLoads       TipperLoad[]
   recipes           MaterialRecipe[]
   leads             Lead[]
+  quotationItems    QuotationItem[]
+  zonePrices        ZonePrice[]
+  zoneRules         ZoneBrickRule[]
+  dies              Die[]
 }
 
 model ConstructionType {
@@ -132,6 +265,60 @@ model ConstructionType {
   orderItems     OrderItem[]
   deliveryItems  DeliveryItem[]
   leads          Lead[]
+  quotationItems QuotationItem[]
+  zonePrices     ZonePrice[]
+}
+
+// Delivery-distance pricing, matching the owner's "Area rate" reference
+// sheet: towns are grouped into zones by rough distance from the factory,
+// each with its own minimum order size and sell price per (brick size ×
+// construction type). This is deliberately separate from BrickPrice, which
+// stays the flat default matrix used for production costing — ZonePrice is
+// customer-facing quotation pricing only, selected explicitly by whoever
+// builds the quote (no auto-matching of free-text "place" text to a zone).
+model DeliveryZone {
+  id            String  @id @default(cuid())
+  name          String  @unique // e.g. "Salem, Erode, Sankagiri…"
+  distanceLabel String  @default("") // "60-90 km", shown next to the name in pickers
+  areas         String  @default("") // reference town list, shown to help pick the right zone
+  order         Int     @default(0)
+  active        Boolean @default(true)
+
+  rules      ZoneBrickRule[]
+  prices     ZonePrice[]
+  quotations Quotation[]
+  leads      Lead[]
+
+  @@index([order])
+}
+
+// Per-zone, per-brick-size minimum order quantity and "transport only" rate
+// (for a customer supplying their own bricks). Both are optional per size —
+// 0 minimum means no minimum, null transportOnly means that zone doesn't
+// offer transport-only delivery for that size.
+model ZoneBrickRule {
+  id            String       @id @default(cuid())
+  zoneId        String
+  zone          DeliveryZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  brickSizeId   String
+  brickSize     BrickSize    @relation(fields: [brickSizeId], references: [id], onDelete: Cascade)
+  minBricks     Int          @default(0)
+  transportOnly Float?
+
+  @@unique([zoneId, brickSizeId])
+}
+
+model ZonePrice {
+  id                 String           @id @default(cuid())
+  zoneId             String
+  zone               DeliveryZone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  brickSizeId        String
+  brickSize          BrickSize        @relation(fields: [brickSizeId], references: [id], onDelete: Cascade)
+  constructionTypeId String
+  constructionType   ConstructionType @relation(fields: [constructionTypeId], references: [id], onDelete: Cascade)
+  sellPrice          Float
+
+  @@unique([zoneId, brickSizeId, constructionTypeId])
 }
 
 // Pricing matrix: each (size × constructionType) has sellPrice + masonRate
@@ -239,6 +426,8 @@ model Vendor {
   expenses    Expense[]
   tipperLoads TipperLoad[]
   loadingCharges LoadingCharge[]
+  vendorPayments VendorPayment[]
+  dies        Die[]
 }
 
 model Tipper {
@@ -253,6 +442,7 @@ model Tipper {
 
   loads        TipperLoad[]
   loadingWorks LoadingWork[]
+  vendorPayments VendorPayment[]
 }
 
 model Client {
@@ -269,6 +459,7 @@ model Client {
   loadingWorks LoadingWork[]
   loadingCharges LoadingCharge[]
   leads Lead[]
+  quotations Quotation[]
 }
 
 // ─── Operations ────────────────────────────────────────────────────────
@@ -338,10 +529,36 @@ model Expense {
   vendorId    String?
   vendor      Vendor?         @relation(fields: [vendorId], references: [id])
   tipperId    String?         // expenses tagged to a tipper (diesel, oil, EMI, etc.)
+  loadGroupId String?         // links this expense to a LoadingWork/TipperLoad/LoadingCharge group
   cashEntryId String?         @unique
   cashEntry   CashEntry?      @relation(fields: [cashEntryId], references: [id])
 
   @@index([date])
+  @@index([loadGroupId])
+}
+
+// Adopted from a schema branch built directly against this database (not
+// through this repo's Prisma workflow) — added here so the app can actually
+// see and manage these rows going forward. Relation field names below are
+// this repo's own convention (lowercase-first); they don't affect the
+// underlying columns, so renaming them from how they were introspected is
+// data-safe.
+model VendorPayment {
+  id          String     @id @default(cuid())
+  date        DateTime   @default(now())
+  vendorId    String
+  vendor      Vendor     @relation(fields: [vendorId], references: [id])
+  tipperId    String?
+  tipper      Tipper?    @relation(fields: [tipperId], references: [id])
+  kind        String     @default("advance") // advance | settlement | other
+  amount      Float
+  method      String     @default("cash") // cash | gpay | bank | upi | cheque
+  notes       String?
+  cashEntryId String?    @unique
+  cashEntry   CashEntry? @relation(fields: [cashEntryId], references: [id])
+
+  @@index([date])
+  @@index([vendorId])
 }
 
 // Tipper loads = either income (delivering bricks/RM for a fee) OR
@@ -479,6 +696,7 @@ model Order {
   slabItems OrderSlabItem[]
   deliveries Delivery[]
   payments   ClientPayment[]
+  quotation  Quotation?
 }
 
 model OrderItem {
@@ -516,12 +734,18 @@ model Delivery {
   truckPlate   String?
   notes        String?
   completedAt  DateTime? // set when the owner marks the delivery done (evening check)
+  // Present in the live database with historical values but not currently
+  // read or written by any app code (loadGroupId grouping today only spans
+  // LoadingWork/TipperLoad/LoadingCharge, not Delivery). Restored here rather
+  // than dropped so `db push` doesn't delete pre-existing data; left unwired.
+  loadGroupId  String?
 
   items     DeliveryItem[]
   addOns    DeliveryAddOn[]
   returns   DeliveryReturn[]
 
   @@index([date])
+  @@index([loadGroupId])
 }
 
 model DeliveryItem {
@@ -730,8 +954,57 @@ model Lead {
   // Lets new extracted fields ship without a migration or a broken integration.
   extra Json?
 
-  source String @default("transcriber")
+  source String @default("transcriber") // transcriber | meta
+
+  // Set on leads ingested from Meta Lead Ads (POST /api/v1/leads/meta/webhook).
+  // Null for Transcriber-sourced leads.
+  campaignId String?
+  adsetId    String?
+  adId       String?
+  formId     String?
+  platform   String? // facebook | instagram
+
   status String @default("open") // open | converted | discarded
+
+  // Admin-configurable pipeline stage (see LeadStage). Nullable because a lead
+  // created before this feature shipped may not have been backfilled yet, and
+  // because an import may reference a `quotationStage` string that doesn't
+  // resolve to any configured stage. `quotationStage` above remains the
+  // source of truth for the Transcriber/Meta ingestion contract; `stageId` is
+  // a parallel, richer layer for the admin-driven Kanban pipeline, kept in
+  // sync one-directionally (stage moves also update quotationStage; imports
+  // never write stageId directly, only best-effort resolve it).
+  stageId        String?
+  stage          LeadStage? @relation(fields: [stageId], references: [id])
+  // When the lead entered its current stage — days-in-stage is derived from
+  // this purely by age, the same way stock.ts derives curing stage from
+  // producedAt. No background job needed.
+  stageEnteredAt DateTime?
+
+  // Who is working this lead. Null means unassigned — the state a freshly
+  // ingested Meta lead lands in, and the thing the intake queue exists to
+  // show. Deliberately SetNull on user deletion: losing the owner must never
+  // take the lead with it.
+  ownerUserId String?
+  owner       User?   @relation("LeadOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  // Delivery zone, set EXPLICITLY by a human — never inferred from the
+  // free-text `place`. The zones are 20km price bands whose area lists
+  // genuinely overlap (see prisma/delivery-zone-defs.ts: "Ammapettai" and
+  // "Thoppur" each appear in two), so guessing is a ₹4-6/brick error on a
+  // document about to be quoted.
+  //
+  // It exists as a first-class column because auto-drafting needs it: with
+  // Settings.autoQuoteRequiresZone on (the default), a lead with no zone is
+  // skipped, and before this field there was nowhere for the telecaller to
+  // record the zone they established on the call — so the feature could
+  // never draft anything.
+  zoneId String?
+  zone   DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+
+  // WhatsApp nurturing state.
+  whatsappOptOut Boolean   @default(false)
+  lastInboundAt  DateTime?
 
   // Set when the lead becomes a real customer. A converted lead is locked:
   // further imports for the same callId are refused with 409 rather than
@@ -743,13 +1016,20 @@ model Lead {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  imports LeadImport[]
+  imports       LeadImport[]
+  stageHistory  LeadStageHistory[]
+  waEnrollments WaEnrollment[]
+  waMessages    WaMessage[]
+  quotations    Quotation[]
+  activities    LeadActivity[]
 
+  @@index([ownerUserId])
   @@index([quotationStage])
   @@index([followUpDate])
   @@index([createdAt])
   @@index([status])
   @@index([callId])
+  @@index([stageId])
 }
 
 // Append-only audit of every import request, including the ones that were
@@ -768,12 +1048,413 @@ model LeadImport {
   // Which credential was used, for revocation/forensics. Never the key itself.
   apiKeyLabel String @default("")
   requestId   String
+  // Which inbound channel produced this row — transcriber (phone calls) or
+  // meta (Lead Ads webhook / backfill sync).
+  channel     String @default("transcriber")
 
   receivedAt DateTime @default(now())
 
   @@index([callId])
   @@index([receivedAt])
   @@index([outcome])
+}
+
+// What a human did about a lead, one row per touch.
+//
+// Before this, "we called them twice and they asked us to ring back after
+// Pongal" could only live in Lead.notes — a single mutable text field that
+// the next import may merge over, with no author, no timestamp per entry and
+// no way to count attempts. That makes the one question a sales desk actually
+// asks ("who has this, what happened, what next?") unanswerable.
+//
+// Kept append-only on purpose: an activity row is a record of what was done,
+// so it is never edited, and the lead's current state is derived from the
+// newest row rather than stored twice.
+model LeadActivity {
+  id     String @id @default(cuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// call | whatsapp | visit | note | stage | assign | quote
+  kind String @default("call")
+
+  /// Call dispositions: connected | no-answer | busy | wrong-number
+  /// | not-interested | call-back | qualified. Free-form rather than an enum
+  /// so the office can start recording a new outcome without a migration,
+  /// matching how Lead.quotationStage already works.
+  outcome String @default("")
+
+  note String @default("")
+
+  /// What the lead asked for next, if anything. Mirrored onto
+  /// Lead.followUpDate by the action that writes this row so the existing
+  /// "Follow-ups due" view keeps working unchanged.
+  nextActionAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Raw inbound webhook deliveries, stored BEFORE the payload is interpreted.
+//
+// LeadImport above records what an import did; this records what arrived. The
+// difference matters because of how the Meta webhook has to behave: it must
+// answer 200 even when it could not process a delivery, since a non-2xx
+// triggers Meta's retry storm. The consequence today is that a lead lost to a
+// transient Graph API failure is lost permanently — there is nothing left to
+// retry FROM.
+//
+// Keeping the verbatim body (and the headers needed to re-verify it) makes a
+// delivery replayable, which is what turns a provider-side outage, a
+// mis-mapped field, or a bug in our own normaliser from "those leads are
+// gone" into "re-run those rows". It is also the only place a signature
+// rejection is visible, since by design we tell the sender nothing.
+model LeadWebhookDelivery {
+  id      String @id @default(cuid())
+  channel String // the <channel> path segment, or "meta" for the Graph webhook
+
+  /// Provider's own id for the submission, when the payload carried one.
+  /// Our idempotency key, so a replay updates rather than duplicates.
+  externalId String?
+
+  headers Json // signature/timestamp/request-id headers only — never all of them
+  body    String // verbatim request body, exactly as signed
+
+  /// pending | imported | duplicate | rejected | failed
+  /// `rejected` is a delivery we refused (bad signature, no phone) and will
+  /// never retry. `failed` is one WE could not complete, and is replayable.
+  status      String  @default("pending")
+  /// created | updated | conflict | error for a single submission; for a
+  /// batch delivery, `batch:<accepted>/<total>` — one row covers the whole
+  /// batch, while the per-submission outcomes land in LeadImport.
+  outcome     String  @default("")
+  statusCode  Int     @default(0)
+  message     String  @default("")
+  requestId   String
+  leadId      String?
+
+  attempts    Int       @default(0)
+  lastAttempt DateTime?
+  /// Set when an admin replays this delivery, so a replayed row is
+  /// distinguishable from one that succeeded first time.
+  replayedAt  DateTime?
+
+  receivedAt DateTime @default(now())
+
+  @@index([channel, receivedAt])
+  @@index([status])
+  @@index([externalId])
+}
+
+// ─── Lead pipeline stages (admin-configurable master data) ────────────
+
+// Replaces a hard-coded pipeline with admin-editable Kanban columns. `slug`
+// is set once at creation and never exposed on the update schema — there is
+// no column-level immutability reachable through `prisma db push`, so this is
+// enforced at the application layer only (see settings/actions.ts).
+//
+// Never hard-deleted: it's referenced by Lead.stageId and
+// LeadStageHistory.toStageId, so like Operator/Vendor/Machine it is
+// soft-deactivated (isActive: false) instead, with existing leads reassigned
+// to a destination stage first (see deactivateLeadStage).
+model LeadStage {
+  id        String  @id @default(cuid())
+  name      String
+  slug      String  @unique
+  sortOrder Int     @default(0)
+  colour    String  @default("#64748B")
+  isDefault Boolean @default(false) // where a lead with no stage resolves to
+  isWon     Boolean @default(false) // convertLeadCore / quotation acceptance move leads here
+  isLost    Boolean @default(false) // discardLead moves leads here
+  isActive  Boolean @default(true)
+
+  leads         Lead[]
+  historyFrom   LeadStageHistory[] @relation("HistoryFrom")
+  historyTo     LeadStageHistory[] @relation("HistoryTo")
+  waSequences   WaSequence[]
+
+  @@index([isActive])
+}
+
+// Append-only audit of every stage move — Kanban drag, admin reassignment on
+// stage deactivation, or a system move (conversion, quotation acceptance).
+model LeadStageHistory {
+  id     String @id @default(cuid())
+  leadId String?
+  lead   Lead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  fromStageId String?
+  fromStage   LeadStage? @relation("HistoryFrom", fields: [fromStageId], references: [id])
+  toStageId   String
+  toStage     LeadStage  @relation("HistoryTo", fields: [toStageId], references: [id])
+
+  changedAt DateTime @default(now())
+  changedBy String? // User.id; null = system (import, cron, conversion)
+  note      String?
+
+  @@index([leadId])
+  @@index([toStageId])
+}
+
+// ─── WhatsApp nurturing (Cloud API, driven by Vercel Cron) ────────────
+
+// A Meta-approved message template. Only templates with approved:true may
+// ever be sent — see lib/whatsapp-send.ts. This is what makes the 24-hour
+// session-window rule moot: this system never sends free-form text.
+model WaTemplate {
+  id            String  @id @default(cuid())
+  name          String  @unique // exact Meta template name
+  language      String  @default("en_US")
+  category      String  @default("utility")
+  variableCount Int     @default(0)
+  approved      Boolean @default(false)
+  active        Boolean @default(true)
+  createdAt     DateTime @default(now())
+
+  steps    WaSequenceStep[]
+  messages WaMessage[]
+}
+
+// A named nurture sequence, optionally auto-triggered when a lead enters a
+// given pipeline stage.
+model WaSequence {
+  id             String     @id @default(cuid())
+  name           String     @unique
+  triggerStageId String?
+  triggerStage   LeadStage? @relation(fields: [triggerStageId], references: [id])
+  active         Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+
+  steps       WaSequenceStep[]
+  enrollments WaEnrollment[]
+}
+
+model WaSequenceStep {
+  id           String     @id @default(cuid())
+  sequenceId   String
+  sequence     WaSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  stepOrder    Int
+  delayMinutes Int // minutes after enrollment (step 1) or after the previous step fires
+  templateId   String
+  template     WaTemplate @relation(fields: [templateId], references: [id])
+
+  enrollments WaEnrollment[]
+
+  @@unique([sequenceId, stepOrder])
+}
+
+// One lead's progress through one sequence. `nextRunAt`/`claimedAt` are the
+// tick endpoint's claim mechanism — see api/v1/whatsapp/tick/route.ts.
+model WaEnrollment {
+  id            String          @id @default(cuid())
+  leadId        String
+  lead          Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sequenceId    String
+  sequence      WaSequence      @relation(fields: [sequenceId], references: [id])
+  currentStepId String?
+  currentStep   WaSequenceStep? @relation(fields: [currentStepId], references: [id])
+  status        String          @default("active") // active | completed | stopped
+  stopReason    String? // opt_out | replied | stage | manual
+  nextRunAt     DateTime?
+  // Claim fields: a tick sets both atomically via a guarded updateMany so two
+  // overlapping cron invocations can't both process the same row. Always
+  // cleared in a try/finally, with a >10min-old claim reclaimable as a
+  // safety net against a crashed invocation.
+  claimedAt     DateTime?
+  claimToken    String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  messages WaMessage[]
+
+  @@unique([leadId, sequenceId])
+  @@index([nextRunAt])
+  @@index([status])
+}
+
+// One WhatsApp message, in or out. `waMessageId` is Meta's wamid — unique so
+// a redelivered status callback is an idempotent no-op update rather than a
+// duplicate row. `apiResponse` holds the verbatim Graph API response for
+// every attempt, success or failure, in the spirit of LeadImport.payload.
+model WaMessage {
+  id           String        @id @default(cuid())
+  leadId       String
+  lead         Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  enrollmentId String?
+  enrollment   WaEnrollment? @relation(fields: [enrollmentId], references: [id])
+  templateId   String?
+  template     WaTemplate?   @relation(fields: [templateId], references: [id])
+  direction    String // out | in
+  waMessageId  String?       @unique
+  status       String        @default("queued") // queued | sent | delivered | read | failed
+  body         String        @default("")
+  apiResponse  Json?
+  sentAt       DateTime?
+  statusAt     DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([leadId])
+  @@index([waMessageId])
+}
+
+// ─── Quotations ────────────────────────────────────────────────────────
+
+// One row per financial year; the row itself is the lock. Incrementing it
+// inside the same transaction as the Quotation create is safe under
+// serverless concurrency because Postgres row-locks the UPDATE for the
+// transaction's lifetime — a naive count()+1 would not be safe, this is.
+model QuotationCounter {
+  id  String @id // financial year key, e.g. "2026-27"
+  seq Int    @default(0)
+}
+
+// Generated from a lead or a client (never both). Line items freeze their
+// unit price at generation time — see QuotationItem — so a later BrickPrice
+// change can never rewrite an issued quote, exactly like
+// ProductionEntry.totalWage / MasonWork.totalAmount. There is no automated
+// delivery of any kind: `sentAt` is only ever set by the explicit
+// "Mark as sent" action.
+model Quotation {
+  id            String    @id @default(cuid())
+  number        String    @unique // "RD/Q/2026-27/0042"
+  financialYear String
+
+  leadId   String?
+  lead     Lead?   @relation(fields: [leadId], references: [id])
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  // Explicitly picked delivery zone, if any — drives ZonePrice lookup at
+  // generation time. Null means the quote used the flat BrickPrice matrix
+  // (e.g. factory-gate collection, or no zone matched).
+  zoneId String?
+  zone   DeliveryZone? @relation(fields: [zoneId], references: [id])
+
+  // Snapshotted at generation time, independent of later lead/client edits.
+  customerName  String @default("")
+  customerPhone String @default("")
+  place         String @default("")
+
+  quoteDate  DateTime  @default(now())
+  validUntil DateTime?
+  // draft | in_review | changes_requested | approved | sent | accepted
+  // | rejected | expired
+  //
+  // The three middle states are the review gate: the person who spoke to the
+  // customer checks the rendered PDF before it can reach them. They are
+  // skipped entirely when Settings.quoteReviewRequired is false, in which
+  // case a draft goes straight to `approved` — that is what keeps this
+  // change from disrupting a desk that does not want the ceremony.
+  //
+  // `locked` behaviour (no direct edits, revise instead) begins at
+  // `approved`, not at `sent`: once a PDF has been reviewed and frozen,
+  // editing the quotation underneath it would invalidate the approval.
+  status     String    @default("draft")
+
+  // Once sent, the record locks: further edits create a linked revision
+  // instead of mutating it.
+  revision         Int        @default(1)
+  supersededById   String?    @unique
+  supersededBy     Quotation? @relation("Revision", fields: [supersededById], references: [id])
+  previousRevision Quotation? @relation("Revision")
+
+  // ─── Review trail ───────────────────────────────────────────────
+  submittedAt       DateTime?
+  submittedByUserId String?
+  submittedBy       User?     @relation("QuoteSubmitter", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  reviewedAt        DateTime?
+  reviewedByUserId  String?
+  reviewedBy        User?     @relation("QuoteReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  /// Why the reviewer sent it back, or a note recorded on approval.
+  reviewNote        String    @default("")
+
+  // ─── Send queue ─────────────────────────────────────────────────
+  /// Set when an approved quotation enters the send list. Null = not queued.
+  sendQueuedAt  DateTime?
+  sendAttempts  Int       @default(0)
+  sendError     String    @default("")
+  /// Provider message id, when the send went out through an API rather than
+  /// a human's own WhatsApp.
+  sentMessageId String?
+
+  sentAt       DateTime?
+  sentChannel  String? // whatsapp | print | email | other — how the human delivered it
+  sentByUserId String?
+
+  // Set when accepted and converted into a real order.
+  orderId String? @unique
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  subtotal Float @default(0)
+  total    Float @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items    QuotationItem[]
+  document QuotationDocument?
+
+  @@index([leadId])
+  @@index([clientId])
+  @@index([status])
+  @@index([zoneId])
+  @@index([sendQueuedAt])
+}
+
+// The rendered PDF, frozen at the moment it was submitted for review.
+//
+// Why store bytes at all, when api/quote/[id]/pdf can render on demand: that
+// route composes the PDF from CURRENT settings — terms, scope lists, UPI id,
+// signature image, logo. A quotation approved in November and re-opened in
+// January renders with January's settings, so the document the reviewer
+// approved and the document the customer received are not provably the same
+// file. On a priced offer with a revision chain, that is the difference
+// between an audit trail and a guess.
+//
+// So the PDF is rendered once, hashed, and served from here for every later
+// read. A revision renders its own; this row is never overwritten.
+model QuotationDocument {
+  id          String    @id @default(cuid())
+  quotationId String    @unique
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  /// The file itself. Postgres bytea — a quotation PDF is tens of KB, and
+  /// keeping it in the row means the frozen document cannot drift from the
+  /// quotation it belongs to the way a file on an ephemeral disk would.
+  pdf      Bytes
+  byteSize Int
+  /// SHA-256 of `pdf`, so "is this the file that was approved?" is
+  /// answerable without comparing blobs.
+  sha256   String
+
+  renderedAt DateTime @default(now())
+
+  @@index([sha256])
+}
+
+model QuotationItem {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  brickSizeId        String
+  brickSize          BrickSize        @relation(fields: [brickSizeId], references: [id])
+  constructionTypeId String
+  constructionType   ConstructionType @relation(fields: [constructionTypeId], references: [id])
+
+  quantity       Int
+  unitPrice      Float // copied from BrickPrice/ZonePrice at generation time — frozen, never re-derived
+  manualOverride Boolean @default(false) // true when the office typed a different price than the matrix
+  // true = customer supplies their own bricks, this line is delivery only —
+  // unitPrice then comes from ZoneBrickRule.transportOnly, not ZonePrice.
+  transportOnly  Boolean @default(false)
+  total          Float
 }
 
 // ─── Unified Cashbook ─────────────────────────────────────────────────
@@ -799,6 +1480,7 @@ model CashEntry {
   employeePayout EmployeePayout?
   workerPayout  WorkerPayout?
   loadingCharge LoadingCharge?
+  vendorPayment VendorPayment?
 
   @@index([date])
 }

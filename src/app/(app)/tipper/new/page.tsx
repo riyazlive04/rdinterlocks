@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireArea } from "@/lib/auth";
 import { PageHeader, Card } from "@/components/ui";
 import { TipperForm } from "./form";
 import { createTipperLoad } from "../actions";
 
 export default async function NewTipperLoadPage() {
+  await requireArea("tipper");
   const [tippers, sizes] = await Promise.all([
     prisma.tipper.findMany({
       where: { active: true },

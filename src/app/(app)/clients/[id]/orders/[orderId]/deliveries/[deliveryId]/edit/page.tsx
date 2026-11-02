@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui";
 import { DeliveryForm } from "../../new/form";
@@ -10,6 +11,7 @@ export default async function EditDeliveryPage({
 }: {
   params: Promise<{ id: string; orderId: string; deliveryId: string }>;
 }) {
+  await requireArea("sales");
   const { id, orderId, deliveryId } = await params;
   const [delivery, order, sizes, ctypes, prices] = await Promise.all([
     prisma.delivery.findUnique({

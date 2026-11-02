@@ -278,6 +278,19 @@ export const Icon = {
       <path d="M4 6h16M4 12h16M4 18h16" />
     </SVG>
   ),
+  Chat: (p: IconProps) => (
+    <SVG {...p}>
+      <path d="M4 4h16v12H8l-4 4V4z" />
+      <path d="M8 9h8M8 12.5h5" />
+    </SVG>
+  ),
+  FileText: (p: IconProps) => (
+    <SVG {...p}>
+      <path d="M7 3h7l4 4v14H7z" />
+      <path d="M14 3v4h4" />
+      <path d="M9.5 12h5M9.5 15.5h5M9.5 8.5h2" />
+    </SVG>
+  ),
 };
 
 export type IconName = keyof typeof Icon;

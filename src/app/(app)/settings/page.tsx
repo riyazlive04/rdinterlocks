@@ -23,6 +23,7 @@ const sections: Array<{
       { href: "/settings/slab-sizes", label: "Lintel slab sizes", sub: "4, 5, 6 - add/edit", icon: "Brick" },
       { href: "/settings/construction-types", label: "Construction types", sub: "Room, Compound, Godown - add more", icon: "Building" },
       { href: "/settings/price-matrix", label: "Price matrix", sub: "Sell price + mason rate per size × type", icon: "Tag" },
+      { href: "/settings/delivery-zones", label: "Delivery zones", sub: "Location-based price + minimum order for quotations", icon: "Truck" },
     ],
   },
   {
@@ -47,6 +48,29 @@ const sections: Array<{
       { href: "/settings/expense-categories", label: "Expense categories", sub: "Cement, Diesel, EB, Mould, etc.", icon: "Tag" },
       { href: "/settings/materials", label: "Raw materials", sub: "Materials + usage per batch", icon: "Box" },
       { href: "/settings/material-stock", label: "Raw material stock", sub: "On-hand qty, reorder, add received", icon: "Stack" },
+    ],
+  },
+  {
+    group: "Leads",
+    items: [
+      { href: "/settings/lead-stages", label: "Pipeline stages", sub: "Kanban columns, colours, won/lost flags", icon: "Flag" },
+    ],
+  },
+  {
+    group: "Quotations",
+    items: [
+      { href: "/settings/quote-content", label: "Quotation content", sub: "Terms, scope, UPI payment details (English + Tamil)", icon: "FileText" },
+    ],
+  },
+  {
+    group: "Automation",
+    items: [
+      {
+        href: "/settings/automation",
+        label: "Automation",
+        sub: "Review gate, auto-drafted quotations, lead assignment, quote expiry",
+        icon: "Clock",
+      },
     ],
   },
   {

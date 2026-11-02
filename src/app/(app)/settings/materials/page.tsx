@@ -1,10 +1,12 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { RecipeEditor } from "./recipe-editor";
 import { createMaterial, updateMaterial, deleteMaterial, upsertRecipe } from "../actions";
 
 export default async function MaterialsPage() {
+  await requireAdmin();
   const [rows, sizes, recipes, settings] = await Promise.all([
     prisma.material.findMany({ orderBy: { name: "asc" } }),
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),

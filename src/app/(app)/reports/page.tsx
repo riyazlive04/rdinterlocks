@@ -14,6 +14,7 @@ const kinds: Array<{ k: ReportKind | "summary"; label: string }> = [
   { k: "summary", label: "Summary" },
   { k: "production", label: "Production" },
   { k: "sales", label: "Sales" },
+  { k: "leads", label: "Leads" },
   { k: "expense", label: "Expense" },
   { k: "tipper", label: "Tipper" },
   { k: "mason", label: "Mason" },
@@ -306,6 +307,7 @@ export default async function ReportsPage({
           vendorId={sp?.vendorId}
           tipperId={sp?.tipperId}
           personId={sp?.personId}
+          includeRevenue={canRevenue}
         />
       )}
     </>
@@ -471,6 +473,7 @@ async function LedgerSection({
   kind,
   from,
   to,
+  includeRevenue,
   ...filters
 }: {
   kind: ReportKind;
@@ -482,8 +485,9 @@ async function LedgerSection({
   vendorId?: string;
   tipperId?: string;
   personId?: string;
+  includeRevenue: boolean;
 }) {
-  const data = await getReportData({ from, to, kind, ...filters });
+  const data = await getReportData({ from, to, kind, includeRevenue, ...filters });
   const totalEntries = data.sections.reduce((s, sec) => s + sec.rows.length, 0);
   return (
     <>

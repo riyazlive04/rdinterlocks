@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createSlabSize, updateSlabSize, deleteSlabSize } from "../actions";
 
 export default async function SlabSizesPage() {
+  await requireAdmin();
   const rows = await prisma.slabSize.findMany({ orderBy: { order: "asc" } });
   return (
     <>

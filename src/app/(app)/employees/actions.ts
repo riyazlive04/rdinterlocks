@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea } from "@/lib/auth";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { startOfDay } from "@/lib/format";
@@ -10,6 +11,7 @@ export async function setAttendance(
   date: string,
   status: "present" | "absent" | "leave" | "half"
 ) {
+  await requireArea("employees");
   const d = startOfDay(new Date(date));
   await prisma.employeeAttendance.upsert({
     where: { date_employeeId: { date: d, employeeId } },
@@ -29,6 +31,7 @@ const advanceSchema = z.object({
 });
 
 export async function giveEmployeeAdvance(input: z.infer<typeof advanceSchema>) {
+  await requireArea("employees");
   const p = advanceSchema.parse(input);
   const emp = await prisma.employee.findUnique({ where: { id: p.employeeId } });
   if (!emp) throw new Error("Employee not found");
@@ -72,6 +75,7 @@ const payoutSchema = z.object({
 });
 
 export async function recordPayout(input: z.infer<typeof payoutSchema>) {
+  await requireArea("employees");
   const p = payoutSchema.parse(input);
   const emp = await prisma.employee.findUnique({ where: { id: p.employeeId } });
   if (!emp) throw new Error("Employee not found");

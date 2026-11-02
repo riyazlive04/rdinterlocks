@@ -9,6 +9,7 @@ type Settings = {
   ownerName: string;
   address: string;
   phone: string;
+  email: string;
   gstin: string;
   cementBagsPer1000: number;
   materialBasis: number;
@@ -79,6 +80,13 @@ export function FactoryForm({
           <Input
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          />
+        </Field>
+        <Field label="Email" hint="Shown on the quotation letterhead">
+          <Input
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
         </Field>
         <Field label="GSTIN">

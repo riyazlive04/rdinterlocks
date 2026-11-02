@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createVendor, updateVendor, deleteVendor } from "../actions";
 
 export default async function VendorsPage() {
+  await requireAdmin();
   const rows = await prisma.vendor.findMany({ where: { active: true }, orderBy: { name: "asc" } });
   return (
     <>

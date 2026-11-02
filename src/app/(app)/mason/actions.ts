@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -16,6 +17,7 @@ const workSchema = z.object({
 });
 
 export async function createMasonWork(input: z.infer<typeof workSchema>) {
+  await requireArea("mason");
   const p = workSchema.parse(input);
   const total = p.brickCount * p.ratePerBrick;
   await prisma.masonWork.create({
@@ -35,6 +37,7 @@ export async function createMasonWork(input: z.infer<typeof workSchema>) {
 }
 
 export async function updateMasonWork(id: string, input: z.infer<typeof workSchema>) {
+  await requireArea("mason");
   const p = workSchema.parse(input);
   await prisma.masonWork.update({
     where: { id },
@@ -54,6 +57,7 @@ export async function updateMasonWork(id: string, input: z.infer<typeof workSche
 }
 
 export async function deleteMasonWork(id: string) {
+  await requireArea("mason");
   await prisma.masonWork.delete({ where: { id } });
   revalidatePath("/mason");
 }
@@ -67,6 +71,7 @@ const advanceSchema = z.object({
 });
 
 export async function giveMasonAdvance(input: z.infer<typeof advanceSchema>) {
+  await requireArea("mason");
   const p = advanceSchema.parse(input);
   const mason = await prisma.mason.findUnique({ where: { id: p.masonId } });
   if (!mason) throw new Error("Mason not found");

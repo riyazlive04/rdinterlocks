@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createOperator, updateOperator, deleteOperator } from "../actions";
 
 export default async function OperatorsPage() {
+  await requireAdmin();
   const rows = await prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } });
   return (
     <>

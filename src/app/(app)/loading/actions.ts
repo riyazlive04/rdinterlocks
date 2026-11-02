@@ -1,6 +1,7 @@
 "use server";
 
 import { randomUUID } from "crypto";
+import { requireArea, requireAnyArea } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -145,6 +146,7 @@ async function wireExtras(p: CreateParsed, loadGroupId: string, date: Date) {
 }
 
 export async function createLoadingWork(input: CreateInput) {
+  await requireArea("loading");
   const p = createSchema.parse(input);
   const date = new Date(p.date);
   const loadGroupId = randomUUID();
@@ -196,6 +198,7 @@ const updateSchema = z.object({
 });
 
 export async function updateLoadingWork(id: string, input: z.infer<typeof updateSchema>) {
+  await requireArea("loading");
   const p = updateSchema.parse(input);
   await prisma.loadingWork.update({
     where: { id },
@@ -229,6 +232,7 @@ async function deleteGroupExtras(loadGroupId: string) {
 }
 
 export async function deleteLoadingWork(id: string) {
+  await requireArea("loading");
   const row = await prisma.loadingWork.findUnique({ where: { id } });
   if (!row) return;
   await prisma.loadingWork.delete({ where: { id } });
@@ -248,6 +252,7 @@ export async function deleteLoadingWork(id: string) {
 
 // Delete a single add-on charge (and its cash entry) — the "zero it out" path.
 export async function deleteLoadingCharge(id: string) {
+  await requireAnyArea(["loading", "sales"]);
   const charge = await prisma.loadingCharge.findUnique({ where: { id } });
   if (!charge) return;
   await prisma.loadingCharge.delete({ where: { id } });

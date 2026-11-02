@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MaterialStockEditor } from "./stock-editor";
 import { setMaterialStock, addMaterialStock } from "../actions";
 
 export default async function MaterialStockPage() {
+  await requireAdmin();
   const materials = await prisma.material.findMany({
     orderBy: { name: "asc" },
     include: { stock: true },

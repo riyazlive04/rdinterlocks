@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireArea } from "@/lib/auth";
 import { PageHeader, Card } from "@/components/ui";
 import { MasonWorkForm } from "./form";
 import { createMasonWork } from "../actions";
 
 export default async function NewMasonWorkPage() {
+  await requireArea("mason");
   const [masons, sizes, ctypes, prices] = await Promise.all([
     prisma.mason.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),

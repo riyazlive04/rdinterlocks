@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea } from "@/lib/auth";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 
@@ -17,6 +18,7 @@ const schema = z.object({
 // Creates the cash-out entry + the linked Advance with the correct person FK,
 // so payroll's "open advances" and the cash book both stay in sync.
 export async function createWorkerAdvance(input: z.infer<typeof schema>) {
+  await requireArea("payroll");
   const p = schema.parse(input);
 
   let name = "";
@@ -117,6 +119,7 @@ const paySchema = z.object({
 // payout, and settles their open advances up to advancesSettled. Net payable
 // on payroll = earned − advances − paid, so after this the row reads ₹0.
 export async function payWorker(input: z.infer<typeof paySchema>) {
+  await requireArea("payroll");
   const p = paySchema.parse(input);
   const { name, fkKey } = await resolvePerson(p.personType, p.personId);
   const label = p.personType.charAt(0).toUpperCase() + p.personType.slice(1);

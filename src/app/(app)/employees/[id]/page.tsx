@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requireArea } from "@/lib/auth";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Avatar, Card, PageHeader, Pill } from "@/components/ui";
@@ -20,6 +21,7 @@ export default async function EmployeeDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireArea("employees");
   const { id } = await params;
   const employee = await prisma.employee.findUnique({ where: { id } });
   if (!employee) notFound();

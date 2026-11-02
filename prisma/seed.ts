@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { LEAD_STAGE_DEFS } from "./lead-stage-defs";
 
 const prisma = new PrismaClient();
 
@@ -10,8 +11,56 @@ function daysAgo(n: number) {
   return d;
 }
 
+/**
+ * Refuses to run against a database that already holds real work.
+ *
+ * Everything below this is a WIPE: 34 deleteMany() calls covering clients,
+ * orders, deliveries, cash, expenses, payroll, employees, the price matrix,
+ * users and settings. That is correct for a fresh install and catastrophic
+ * anywhere else — and README.md lists `npm run db:seed` as step 2 of "Run
+ * locally", which is exactly the instruction somebody follows while pointing
+ * at the live database.
+ *
+ * So the script now decides for itself: if the database looks live, it stops
+ * and makes the caller say --force-reset out loud.
+ */
+async function assertSafeToReset() {
+  if (process.argv.includes("--force-reset")) {
+    console.warn("--force-reset given: wiping an existing database on purpose.\n");
+    return;
+  }
+
+  const [clients, orders, leads, deliveries, cash] = await Promise.all([
+    prisma.client.count(),
+    prisma.order.count(),
+    prisma.lead.count(),
+    prisma.delivery.count(),
+    prisma.cashEntry.count(),
+  ]);
+  const total = clients + orders + leads + deliveries + cash;
+  if (total === 0) return; // empty database — a genuine fresh install
+
+  console.error(
+    `\nREFUSING TO SEED — this database already holds real data:\n` +
+      `   clients ${clients} · orders ${orders} · leads ${leads} · ` +
+      `deliveries ${deliveries} · cash entries ${cash}\n\n` +
+      `This script DELETES all of it (34 tables, including users and settings)\n` +
+      `before inserting sample data. It is for a fresh install only.\n\n` +
+      `If you wanted to add master data to a live database, use the targeted,\n` +
+      `idempotent seeds instead — each dry-runs by default:\n` +
+      `   npx tsx prisma/seed-delivery-zones.ts\n` +
+      `   npx tsx prisma/seed-brick-prices.ts\n` +
+      `   npx tsx prisma/seed-quote-settings.ts\n` +
+      `   npx tsx prisma/backfill-lead-stages.ts\n\n` +
+      `If you really do want to erase everything above, re-run with:\n` +
+      `   npx tsx prisma/seed.ts --force-reset\n`
+  );
+  process.exit(1);
+}
+
 async function main() {
   console.log("Seeding RD Interlock Bricks…");
+  await assertSafeToReset();
 
   // wipe (children first)
   await prisma.materialStock.deleteMany().catch(() => {});
@@ -190,6 +239,25 @@ async function main() {
       { materialId: materials.Sludge.id, quantity: 8, reorderAt: 2 },
     ],
   });
+
+  // Lead pipeline stages. Never wiped above — Lead.stageId FKs into this
+  // table and Lead itself is never wiped by this script — so this is an
+  // idempotent upsert-by-slug rather than a delete+recreate.
+  for (const s of LEAD_STAGE_DEFS) {
+    await prisma.leadStage.upsert({
+      where: { slug: s.slug },
+      update: {},
+      create: {
+        slug: s.slug,
+        name: s.name,
+        sortOrder: s.sortOrder,
+        colour: s.colour,
+        isDefault: s.isDefault ?? false,
+        isWon: s.isWon ?? false,
+        isLost: s.isLost ?? false,
+      },
+    });
+  }
 
   // Operators
   const operators = await Promise.all(

@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { FactoryForm } from "./form";
 import { updateSettings } from "../actions";
 
 export default async function FactorySettingsPage() {
+  await requireAdmin();
   const s = await prisma.settings.findUnique({ where: { id: "default" } });
   return (
     <>
@@ -14,6 +16,7 @@ export default async function FactorySettingsPage() {
           ownerName: s?.ownerName ?? "Admin",
           address: s?.address ?? "",
           phone: s?.phone ?? "",
+          email: s?.email ?? "",
           gstin: s?.gstin ?? "",
           cementBagsPer1000: s?.cementBagsPer1000 ?? 18,
           materialBasis: s?.materialBasis ?? 1000,

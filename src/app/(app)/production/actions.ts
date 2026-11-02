@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea, requireAnyArea } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -31,6 +32,7 @@ const schema = z.object({
 });
 
 export async function createProduction(input: z.infer<typeof schema>) {
+  await requireArea("production");
   const p = schema.parse(input);
   const date = startOfDay(new Date(p.date));
   const totalWage = Math.round(p.brickCount * p.ratePerBrick);
@@ -97,6 +99,7 @@ export async function createProduction(input: z.infer<typeof schema>) {
 }
 
 export async function updateProduction(id: string, input: z.infer<typeof schema>) {
+  await requireArea("production");
   const p = schema.parse(input);
   const date = startOfDay(new Date(p.date));
   const totalWage = Math.round(p.brickCount * p.ratePerBrick);
@@ -208,6 +211,7 @@ const dailySchema = z.object({
 });
 
 export async function createDailyProduction(input: z.infer<typeof dailySchema>) {
+  await requireAnyArea(["production", "day"]);
   const p = dailySchema.parse(input);
   const date = startOfDay(new Date(p.date));
 
@@ -274,6 +278,7 @@ export async function createDailyProduction(input: z.infer<typeof dailySchema>) 
 }
 
 export async function deleteProduction(id: string) {
+  await requireArea("production");
   const existing = await prisma.productionEntry.findUnique({ where: { id } });
   if (!existing) return;
 
@@ -302,6 +307,7 @@ export async function deleteProduction(id: string) {
 }
 
 export async function advanceBatch(id: string) {
+  await requireArea("production");
   const order = ["produced", "drying", "curing", "ready", "dispatched"] as const;
   const b = await prisma.stockBatch.findUnique({ where: { id } });
   if (!b) throw new Error("Batch not found");

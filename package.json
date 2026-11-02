@@ -9,11 +9,19 @@
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:backfill-lead-stages": "tsx prisma/backfill-lead-stages.ts",
     "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "webhook:test": "node scripts/post-lead-webhook.mjs",
+    "cron:tick": "node scripts/run-tick.mjs",
+    "cron:sweep": "node scripts/run-sweep.mjs",
+    "db:zones": "tsx prisma/seed-delivery-zones.ts",
+    "db:prices": "tsx prisma/seed-brick-prices.ts",
+    "db:quote-settings": "tsx prisma/seed-quote-settings.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@sparticuz/chromium": "^149.0.0",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
@@ -21,6 +29,8 @@
     "jose": "^5.9.6",
     "next": "^15.5.19",
     "pdfkit": "^0.15.1",
+    "puppeteer-core": "^25.7.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zod": "^3.23.8"
@@ -29,6 +39,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.9.0",
     "@types/pdfkit": "^0.13.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",

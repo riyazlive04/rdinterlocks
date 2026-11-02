@@ -17,6 +17,8 @@ export default async function LeadsPage({
     stage?: string;
     status?: string;
     due?: string;
+    source?: string;
+    owner?: string;
     page?: string;
   }>;
 }) {
@@ -26,6 +28,11 @@ export default async function LeadsPage({
   const stage = sp?.stage ?? "";
   const status = sp?.status ?? "open";
   const dueOnly = sp?.due === "1";
+  // "" means every source / every owner. The owner=unassigned value is the one
+  // that matters day to day: a lead ingested from Meta arrives with nobody on
+  // it, and nobody calls a lead they do not own.
+  const source = sp?.source ?? "";
+  const owner = sp?.owner ?? "";
   const today = startOfDay();
   const todayEnd = new Date(today.getTime() + 86400000 - 1);
 
@@ -33,6 +40,8 @@ export default async function LeadsPage({
     ...(status === "all" ? {} : { status }),
     ...(stage ? { quotationStage: stage } : {}),
     ...(dueOnly ? { followUpDate: { lte: todayEnd }, status: "open" } : {}),
+    ...(source ? { source } : {}),
+    ...(owner === "unassigned" ? { ownerUserId: null } : owner ? { ownerUserId: owner } : {}),
     ...(q
       ? {
           OR: [
@@ -47,21 +56,31 @@ export default async function LeadsPage({
       : {}),
   };
 
-  const [leads, stageCounts, dueCount, openCount, convertedCount] = await Promise.all([
-    prisma.lead.findMany({
-      where,
-      // Newest lead first — a freshly-dispatched call lands at the top of the
-      // list. Follow-up prioritisation is still available via the "Due" filter
-      // and the "Follow-ups due" button, so nothing is lost by not sorting on it
-      // here.
-      orderBy: { createdAt: "desc" },
-      include: { convertedClient: { select: { id: true, name: true } } },
-    }),
-    prisma.lead.groupBy({ by: ["quotationStage"], _count: true, where: { status: "open" } }),
-    prisma.lead.count({ where: { status: "open", followUpDate: { lte: todayEnd } } }),
-    prisma.lead.count({ where: { status: "open" } }),
-    prisma.lead.count({ where: { status: "converted" } }),
-  ]);
+  const [leads, stageCounts, dueCount, openCount, unassignedCount, convertedCount, users] =
+    await Promise.all([
+      prisma.lead.findMany({
+        where,
+        // Newest lead first — a freshly-dispatched call lands at the top of the
+        // list. Follow-up prioritisation is still available via the "Due" filter
+        // and the "Follow-ups due" button, so nothing is lost by not sorting on it
+        // here.
+        orderBy: { createdAt: "desc" },
+        include: {
+          convertedClient: { select: { id: true, name: true } },
+          owner: { select: { id: true, name: true } },
+        },
+      }),
+      prisma.lead.groupBy({ by: ["quotationStage"], _count: true, where: { status: "open" } }),
+      prisma.lead.count({ where: { status: "open", followUpDate: { lte: todayEnd } } }),
+      prisma.lead.count({ where: { status: "open" } }),
+      prisma.lead.count({ where: { status: "open", ownerUserId: null } }),
+      prisma.lead.count({ where: { status: "converted" } }),
+      prisma.user.findMany({
+        where: { active: true },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+    ]);
 
   const page = Math.max(1, Number(sp?.page) || 1);
   const totalPages = Math.max(1, Math.ceil(leads.length / PAGE_SIZE));
@@ -82,7 +101,7 @@ export default async function LeadsPage({
 
   const qs = (over: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
-    const merged = { q, stage, status, due: dueOnly ? "1" : "", ...over };
+    const merged = { q, stage, status, due: dueOnly ? "1" : "", source, owner, ...over };
     for (const [k, v] of Object.entries(merged)) if (v) params.set(k, v);
     const s = params.toString();
     return s ? `/leads?${s}` : "/leads";
@@ -94,19 +113,36 @@ export default async function LeadsPage({
         title="Leads"
         sub="Enquiries captured from recorded calls"
         right={
-          <Link
-            href="/leads?due=1"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-red text-white text-[13px] font-semibold shadow-red hover:bg-brand-redDark"
-          >
-            <Icon.Clock size={16} />
-            <span className="hidden sm:inline">Follow-ups due</span>
-            <span className="num">{dueCount}</span>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/leads/board"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-[13px] font-semibold text-ink hover:border-slate-400"
+            >
+              <Icon.Chart size={16} />
+              <span className="hidden sm:inline">Board</span>
+            </Link>
+            <Link
+              href="/leads?due=1"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-red text-white text-[13px] font-semibold shadow-red hover:bg-brand-redDark"
+            >
+              <Icon.Clock size={16} />
+              <span className="hidden sm:inline">Follow-ups due</span>
+              <span className="num">{dueCount}</span>
+            </Link>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
         <StatCard label="Open leads" value={formatNumber(openCount)} tone="ink" />
+        {/* The number that decides whether any of this pipeline gets worked at
+            all: a lead nobody owns is a lead nobody is calling. */}
+        <StatCard
+          label="Unassigned"
+          value={formatNumber(unassignedCount)}
+          sub="Open, no owner"
+          tone={unassignedCount > 0 ? "red" : "default"}
+        />
         <StatCard
           label="Follow-ups due"
           value={formatNumber(dueCount)}
@@ -127,6 +163,8 @@ export default async function LeadsPage({
         {stage && <input type="hidden" name="stage" value={stage} />}
         {status !== "open" && <input type="hidden" name="status" value={status} />}
         {dueOnly && <input type="hidden" name="due" value="1" />}
+        {source && <input type="hidden" name="source" value={source} />}
+        {owner && <input type="hidden" name="owner" value={owner} />}
         <div className="relative">
           <Icon.Search
             size={16}
@@ -142,7 +180,7 @@ export default async function LeadsPage({
         </div>
       </form>
 
-      <div className="flex flex-wrap gap-1.5 mb-4">
+      <div className="flex flex-wrap gap-1.5 mb-2">
         <FilterChip href={qs({ stage: "" })} active={!stage} label="All stages" />
         {STAGE_ORDER.map((s) => (
           <FilterChip
@@ -158,6 +196,23 @@ export default async function LeadsPage({
         <FilterChip href={qs({ status: "converted", due: "" })} active={status === "converted"} label="Converted" />
         <FilterChip href={qs({ status: "discarded", due: "" })} active={status === "discarded"} label="Discarded" />
         <FilterChip href={qs({ status: "all", due: "" })} active={status === "all"} label="All" />
+      </div>
+
+      {/* Where the lead came from, and whose job it is. */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <FilterChip href={qs({ source: "" })} active={!source} label="All sources" />
+        <FilterChip href={qs({ source: "meta" })} active={source === "meta"} label="Meta" />
+        <FilterChip href={qs({ source: "transcriber" })} active={source === "transcriber"} label="Call" />
+        <span className="w-px bg-slate-200 mx-1" />
+        <FilterChip href={qs({ owner: "" })} active={!owner} label="All owners" />
+        <FilterChip
+          href={qs({ owner: "unassigned" })}
+          active={owner === "unassigned"}
+          label={`Unassigned ${unassignedCount}`}
+        />
+        {users.map((u) => (
+          <FilterChip key={u.id} href={qs({ owner: u.id })} active={owner === u.id} label={u.name} />
+        ))}
       </div>
 
       {leads.length === 0 ? (
@@ -184,6 +239,12 @@ export default async function LeadsPage({
                       {l.customerName || <span className="text-slate-400">Name not captured</span>}
                     </span>
                     <Pill tone={stageTone(l.quotationStage)}>{stageLabel(l.quotationStage)}</Pill>
+                    {/* A Meta form fill and a recorded call are worked in
+                        completely different ways, so the source belongs on the
+                        row rather than one click in. */}
+                    <Pill tone={l.source === "meta" ? "info" : "slate"}>
+                      {l.source === "meta" ? "Meta" : "Call"}
+                    </Pill>
                     {l.callSequence > 1 && <Pill tone="blue">Call {l.callSequence}</Pill>}
                     {l.status === "converted" && <Pill tone="success">Converted</Pill>}
                     {l.status === "discarded" && <Pill tone="slate">Discarded</Pill>}
@@ -207,6 +268,20 @@ export default async function LeadsPage({
                       <Pill tone="success">→ {l.convertedClient.name}</Pill>
                     )}
                   </div>
+                </div>
+                {/* Owner. "Unassigned" is deliberately loud rather than a quiet
+                    blank — it is a thing to act on, not a missing value. */}
+                <div className="hidden sm:flex flex-shrink-0 w-28 justify-end">
+                  {l.owner ? (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Avatar name={l.owner.name} size={22} />
+                      <span className="text-[12px] font-semibold text-slate-700 truncate">
+                        {l.owner.name}
+                      </span>
+                    </div>
+                  ) : (
+                    <Pill tone="red">Unassigned</Pill>
+                  )}
                 </div>
                 <div className="text-right flex-shrink-0">
                   {value ? (

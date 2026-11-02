@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createMachine, updateMachine, deleteMachine } from "../actions";
 
 export default async function MachinesPage() {
+  await requireAdmin();
   const rows = await prisma.machine.findMany({ where: { active: true }, orderBy: { order: "asc" } });
   return (
     <>

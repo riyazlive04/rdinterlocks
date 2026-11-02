@@ -109,6 +109,26 @@ export async function convertLeadCore(id: string, input: ConvertInput): Promise<
       throw new Error("This lead was converted by someone else a moment ago.");
     }
 
+    // Move the lead to the pipeline's "won" stage too, downstream of the
+    // claim above — no separate guard needed, this only runs once the claim
+    // has already proven this request is the one doing the converting. A
+    // best-effort resolve: if no active isWon stage is configured yet,
+    // quotationStage still reads "won" from the write above.
+    const wonStage = await tx.leadStage.findFirst({ where: { isWon: true, isActive: true } });
+    if (wonStage) {
+      await tx.lead.update({
+        where: { id },
+        data: { stageId: wonStage.id, stageEnteredAt: new Date() },
+      });
+      await tx.leadStageHistory.create({
+        data: { leadId: id, fromStageId: lead.stageId, toStageId: wonStage.id, note: "Lead converted" },
+      });
+    }
+    await tx.waEnrollment.updateMany({
+      where: { leadId: id, status: "active" },
+      data: { status: "stopped", stopReason: "conversion" },
+    });
+
     return targetClientId;
   });
 }

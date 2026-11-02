@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { resolveStageBySlug, triggerWaSequencesForStage } from "./lead-stage";
 
 // Normalisation + upsert for inbound Transcriber leads.
 //
@@ -40,7 +41,15 @@ const FIELD_ALIASES: Record<LeadFieldKey, string[]> = {
   contactKey: ["contactkey", "contactid", "customerkey", "customerid", "phonekey"],
   // "contactname" is checked first — it's the current field name. "customername"
   // and the rest are accepted for older callers and older Transcriber payloads.
-  customerName: ["contactname", "customername", "clientname", "callername", "customer", "name"],
+  customerName: [
+    "contactname",
+    "customername",
+    "clientname",
+    "callername",
+    "fullname", // Meta Lead Ads field name
+    "customer",
+    "name",
+  ],
   phoneNumber: [
     "phonenumber",
     "phone",
@@ -141,6 +150,25 @@ function coerceText(v: unknown): string {
   }
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   return "";
+}
+
+// Strip everything but digits, then drop a leading country/trunk prefix, so
+// "+91 98765 43210", "091-98765-43210" and "9876543210" all normalize to the
+// same 10-digit key. Used for the contactKey fallback so a phone call
+// (Transcriber) and a Meta Lead Ads form submission from the same person
+// merge into one Lead instead of fragmenting on phone-string formatting.
+export function normalizePhoneKey(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+  // Drop any leading zeros FIRST — the trunk prefix ("0" before a national
+  // number) and the IDD prefix ("00" before a country code) both appear ahead
+  // of the "91" this strips next. Handling them in the other order meant
+  // "091-98765-43210" and "00919876543210" fell through every branch and kept
+  // their prefix, so the same person arriving once as "+919876543210" and once
+  // as "091..." produced two contactKeys and therefore two separate Leads —
+  // exactly the fragmentation this key exists to prevent.
+  digits = digits.replace(/^0+/, "");
+  if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2);
+  return digits;
 }
 
 // Money and counts arrive as anything from 12000 to "₹1,20,000" to "2 lakh".
@@ -343,9 +371,11 @@ export function normalizeLeadPayload(body: Record<string, unknown>): NormalizeRe
   const brickCountRaw = numberField("brickCount");
   const phoneNumber = coerceText(pick("phoneNumber"));
   const phoneMasked = coerceText(pick("phoneMasked"));
-  // No explicit contactKey? Fall back to whichever phone we have — it's the
-  // same "one contact" identity the key is meant to capture.
-  const contactKey = coerceText(pick("contactKey")) || phoneNumber || phoneMasked;
+  // No explicit contactKey? Fall back to whichever phone we have, normalized
+  // to bare digits — it's the same "one contact" identity the key is meant
+  // to capture, regardless of which channel's phone-string formatting sent it.
+  const contactKey =
+    coerceText(pick("contactKey")) || normalizePhoneKey(phoneNumber) || normalizePhoneKey(phoneMasked);
   const values: NormalizedLead = {
     callId: coerceText(pick("callId")),
     contactKey,
@@ -421,6 +451,21 @@ async function resolveMasterData(brickType: string, constructionType: string) {
 
 export type ImportOutcome = "created" | "updated" | "conflict";
 
+// Channel-specific tracking, set only by the Meta ingestion path
+// (lib/meta-leads.ts). A Transcriber import never passes this, so those
+// columns are left untouched on both create (default null) and update
+// (existing value preserved) — this is what lets a phone-call lead and a
+// later Meta form submission for the same contactKey share one row without
+// either channel clobbering the other's metadata.
+export type SourceMeta = {
+  source: string; // "meta"
+  campaignId?: string | null;
+  adsetId?: string | null;
+  adId?: string | null;
+  formId?: string | null;
+  platform?: string | null;
+};
+
 // The full persisted row is returned, not the incoming values, so the caller
 // can be shown exactly what the record now holds. That distinction matters on
 // a merge: a thin re-import legitimately leaves earlier fields in place, and
@@ -444,6 +489,12 @@ export type PersistedLead = {
   callSequence: number;
   isFollowUp: boolean;
   status: string;
+  source: string;
+  campaignId: string | null;
+  adsetId: string | null;
+  adId: string | null;
+  formId: string | null;
+  platform: string | null;
 };
 
 export type ImportResult =
@@ -462,7 +513,8 @@ export type ImportResult =
 export async function importLead(
   values: NormalizedLead,
   extra: Record<string, unknown>,
-  mode: "merge" | "replace" = "merge"
+  mode: "merge" | "replace" = "merge",
+  sourceMeta?: SourceMeta
 ): Promise<ImportResult> {
   const refs = await resolveMasterData(values.brickType, values.constructionType);
   const hasExtra = Object.keys(extra).length > 0;
@@ -486,6 +538,12 @@ export async function importLead(
     callSequence: true,
     isFollowUp: true,
     status: true,
+    source: true,
+    campaignId: true,
+    adsetId: true,
+    adId: true,
+    formId: true,
+    platform: true,
   } as const;
 
   const existing = await prisma.lead.findUnique({ where: { contactKey: values.contactKey } });
@@ -516,12 +574,32 @@ export async function importLead(
     const text = (next: string, prev: string) => (replace || next ? next : prev);
     const num = (next: number | null, prev: number | null) =>
       replace || next !== null ? next : prev;
+    // Nullable meta-tracking fields only ever come from the Meta channel, so
+    // a Transcriber update (sourceMeta undefined) leaves them exactly as they
+    // were — this is what lets the two channels share one Lead row without
+    // either overwriting the other's provenance.
+    const metaText = (next: string | null | undefined, prev: string | null) =>
+      replace || next ? next ?? null : prev;
 
     const isNewCall = !!values.callId && !priorCallSeen;
 
     const mergedExtra = replace
       ? extra
       : { ...((existing.extra as Record<string, unknown> | null) ?? {}), ...extra };
+
+    // "new" is the default, not an assertion — don't let it undo a real stage.
+    const finalQuotationStage =
+      replace || values.quotationStage !== "new" ? values.quotationStage : existing.quotationStage;
+
+    // Keep stageId in sync ONLY when quotationStage actually changed and
+    // resolves to a configured, active stage — never on every re-import, and
+    // never by inventing a stage. This is what lets the office drag a lead on
+    // the Kanban board without a later, unrelated import (e.g. a follow-up
+    // call that re-sends the same stage text) silently resetting its position.
+    const stageSync =
+      finalQuotationStage !== existing.quotationStage
+        ? await resolveStageBySlug(finalQuotationStage)
+        : null;
 
     const updated = await prisma.lead.update({
       where: { id: existing.id },
@@ -538,23 +616,38 @@ export async function importLead(
         totalBudget: num(values.totalBudget, existing.totalBudget),
         notes: text(values.notes, existing.notes),
         followUpDate: replace || values.followUpDate ? values.followUpDate : existing.followUpDate,
-        // "new" is the default, not an assertion — don't let it undo a real stage.
-        quotationStage:
-          replace || values.quotationStage !== "new"
-            ? values.quotationStage
-            : existing.quotationStage,
+        quotationStage: finalQuotationStage,
+        ...(stageSync ? { stageId: stageSync.id, stageEnteredAt: new Date() } : {}),
         callSequence: isNewCall ? existing.callSequence + 1 : existing.callSequence,
         isFollowUp: isNewCall ? true : existing.isFollowUp,
         brickSizeId: refs.brickSizeId ?? (replace ? null : existing.brickSizeId),
         constructionTypeId: refs.constructionTypeId ?? (replace ? null : existing.constructionTypeId),
         ...(hasExtra || replace ? { extra: mergedExtra as Prisma.InputJsonValue } : {}),
+        ...(sourceMeta
+          ? {
+              source: sourceMeta.source,
+              campaignId: metaText(sourceMeta.campaignId, existing.campaignId),
+              adsetId: metaText(sourceMeta.adsetId, existing.adsetId),
+              adId: metaText(sourceMeta.adId, existing.adId),
+              formId: metaText(sourceMeta.formId, existing.formId),
+              platform: metaText(sourceMeta.platform, existing.platform),
+            }
+          : {}),
       },
       select,
     });
+    // Best-effort, non-transactional follow-up — mirrors how moveLeadStage
+    // and deactivateLeadStage trigger this, but leads-import.ts's writes
+    // aren't wrapped in a transaction to begin with. Never on a won/lost
+    // stage: that's not a moment to start a new nurture sequence.
+    if (stageSync && !stageSync.isWon && !stageSync.isLost) {
+      await triggerWaSequencesForStage(prisma, existing.id, stageSync.id);
+    }
     return { outcome: "updated", lead: updated };
   }
 
   try {
+    const stageSync = await resolveStageBySlug(values.quotationStage);
     const created = await prisma.lead.create({
       data: {
         contactKey: values.contactKey,
@@ -571,20 +664,30 @@ export async function importLead(
         notes: values.notes,
         followUpDate: values.followUpDate,
         quotationStage: values.quotationStage,
+        ...(stageSync ? { stageId: stageSync.id, stageEnteredAt: new Date() } : {}),
         callSequence: 1,
         isFollowUp: false,
         brickSizeId: refs.brickSizeId,
         constructionTypeId: refs.constructionTypeId,
         ...(hasExtra ? { extra: extra as Prisma.InputJsonValue } : {}),
+        source: sourceMeta?.source ?? "transcriber",
+        campaignId: sourceMeta?.campaignId ?? null,
+        adsetId: sourceMeta?.adsetId ?? null,
+        adId: sourceMeta?.adId ?? null,
+        formId: sourceMeta?.formId ?? null,
+        platform: sourceMeta?.platform ?? null,
       },
       select,
     });
+    if (stageSync && !stageSync.isWon && !stageSync.isLost) {
+      await triggerWaSequencesForStage(prisma, created.id, stageSync.id);
+    }
     return { outcome: "created", lead: created };
   } catch (e) {
     // Two identical contactKeys racing: the unique index is the arbiter, and
     // the loser retries as an update so the request is still idempotent.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return importLead(values, extra, mode);
+      return importLead(values, extra, mode, sourceMeta);
     }
     throw e;
   }
@@ -600,6 +703,7 @@ export async function recordImport(row: {
   message: string;
   apiKeyLabel: string;
   requestId: string;
+  channel?: string; // transcriber (default) | meta
 }) {
   try {
     await prisma.leadImport.create({
@@ -612,6 +716,7 @@ export async function recordImport(row: {
         message: row.message.slice(0, 1000),
         apiKeyLabel: row.apiKeyLabel,
         requestId: row.requestId,
+        channel: row.channel ?? "transcriber",
       },
     });
   } catch (e) {

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { PageHeader, Card } from "@/components/ui";
 import { MasonWorkForm } from "../../new/form";
@@ -10,6 +11,7 @@ export default async function EditMasonWorkPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireArea("mason");
   const { id } = await params;
   const [work, masons, sizes, ctypes, prices] = await Promise.all([
     prisma.masonWork.findUnique({ where: { id } }),

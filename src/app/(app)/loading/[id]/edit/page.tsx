@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { PageHeader, Card } from "@/components/ui";
 import { LoadingForm } from "../../new/form";
@@ -10,6 +11,7 @@ export default async function EditLoadingPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireArea("loading");
   const { id } = await params;
   const [work, loaders, operators, employees, sizes] = await Promise.all([
     prisma.loadingWork.findUnique({ where: { id } }),

@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createTipper, updateTipper, deleteTipper } from "../actions";
 
 export default async function TippersPage() {
+  await requireAdmin();
   const [rows, vendors] = await Promise.all([
     prisma.tipper.findMany({ where: { active: true }, include: { vendor: true } }),
     prisma.vendor.findMany({ where: { active: true } }),

@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createBrickSize, updateBrickSize, deleteBrickSize } from "../actions";
 
 export default async function BrickSizesPage() {
+  await requireAdmin();
   const rows = await prisma.brickSize.findMany({ orderBy: { order: "asc" } });
   return (
     <>
@@ -16,18 +18,26 @@ export default async function BrickSizesPage() {
         rows={rows.map((r) => ({
           id: r.id,
           label: r.label,
+          dimensions: r.dimensions,
           order: r.order,
           dayRate: r.dayRate,
           nightRate: r.nightRate,
         }))}
         fields={[
           { type: "text", key: "label", label: "Label", required: true, placeholder: 'e.g. 6"' },
+          {
+            type: "text",
+            key: "dimensions",
+            label: "Dimensions",
+            placeholder: "e.g. 10.5*5*6",
+          },
           { type: "number", key: "dayRate", label: "Day rate (₹/brick)", step: "0.1", placeholder: "0" },
           { type: "number", key: "nightRate", label: "Night rate (₹/brick)", step: "0.1", placeholder: "0" },
           { type: "number", key: "order", label: "Display order", placeholder: "0" },
         ]}
         columns={[
           { key: "label", header: "Label", format: "bold" },
+          { key: "dimensions", header: "Dimensions", format: "muted" },
           { key: "dayRate", header: "Day ₹", format: "number" },
           { key: "nightRate", header: "Night ₹", format: "number" },
           { key: "order", header: "Order", format: "number" },
@@ -36,6 +46,7 @@ export default async function BrickSizesPage() {
           "use server";
           await createBrickSize({
             label: String(d.label),
+            dimensions: String(d.dimensions || ""),
             order: Number(d.order || 0),
             dayRate: Number(d.dayRate || 0),
             nightRate: Number(d.nightRate || 0),
@@ -45,6 +56,7 @@ export default async function BrickSizesPage() {
           "use server";
           await updateBrickSize(id, {
             label: String(d.label),
+            dimensions: String(d.dimensions || ""),
             order: Number(d.order || 0),
             dayRate: Number(d.dayRate || 0),
             nightRate: Number(d.nightRate || 0),

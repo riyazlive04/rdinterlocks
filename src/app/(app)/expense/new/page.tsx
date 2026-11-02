@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { requireArea } from "@/lib/auth";
 import { PageHeader, Card } from "@/components/ui";
 import { ExpenseForm } from "./form";
 import { createExpense } from "../actions";
@@ -8,6 +9,7 @@ export default async function NewExpensePage({
 }: {
   searchParams: Promise<{ category?: string; tipper?: string; amount?: string; title?: string }>;
 }) {
+  await requireArea("expense");
   const sp = await searchParams;
   const [categories, vendors, tippers] = await Promise.all([
     prisma.expenseCategory.findMany({ orderBy: { order: "asc" } }),

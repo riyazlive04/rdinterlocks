@@ -1,10 +1,11 @@
 // Shared presentation helpers for leads. Used by the /leads pages, the
 // dashboard tile and the read API so a stage means the same thing everywhere.
 
-export const STAGE_ORDER = ["new", "quoted", "negotiating", "won", "lost"] as const;
+export const STAGE_ORDER = ["new", "qualified", "quoted", "negotiating", "won", "lost"] as const;
 
 export const STAGE_LABELS: Record<string, string> = {
   new: "New",
+  qualified: "Qualified",
   quoted: "Quoted",
   negotiating: "Negotiating",
   won: "Won",
@@ -21,6 +22,8 @@ export function stageTone(stage: string): "slate" | "blue" | "warning" | "succes
   switch (stage) {
     case "new":
       return "slate";
+    case "qualified":
+      return "blue";
     case "quoted":
       return "blue";
     case "negotiating":

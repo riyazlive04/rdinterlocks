@@ -125,6 +125,23 @@ export async function requireArea(area: string): Promise<Session> {
   return s;
 }
 
+/**
+ * For a Server Action reachable from more than one area's screens — holding
+ * EITHER area is enough.
+ *
+ * Three actions are shared across areas: deleteLoadingCharge (the loading page
+ * and the client's charge list), createDailyProduction (the daily-entry sheet
+ * and production), and setDeliveryDone (the deliveries list and sales).
+ * Gating those on a single area would lock out the other screen's legitimate
+ * users — e.g. a supervisor with `day` but not `production` could no longer
+ * save the daily entry.
+ */
+export async function requireAnyArea(areas: string[]): Promise<Session> {
+  const s = await requireSession();
+  if (!areas.some((a) => can(s, a))) redirect("/");
+  return s;
+}
+
 export async function requireAdmin(): Promise<Session> {
   const s = await requireSession();
   if (!isAdmin(s.role)) redirect("/");

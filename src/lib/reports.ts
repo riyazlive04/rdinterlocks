@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { stageLabel } from "./leads";
 
 export type ReportKind =
   | "production"
@@ -8,7 +9,8 @@ export type ReportKind =
   | "mason"
   | "loading"
   | "wages"
-  | "cashbook";
+  | "cashbook"
+  | "leads";
 
 export type ReportFilter = {
   from: Date;
@@ -20,6 +22,11 @@ export type ReportFilter = {
   vendorId?: string;
   tipperId?: string;
   personId?: string;
+  // Gates the "leads" report's value column/totals — mirrors the dashboard's
+  // and cashbook's existing `can(session, "revenue")` gate. Callers (the
+  // /reports page and /api/export route) pass this from the session; it
+  // defaults to false so a caller that forgets it fails closed, not open.
+  includeRevenue?: boolean;
 };
 
 export type LedgerCol = {
@@ -803,6 +810,67 @@ export async function getReportData(filter: ReportFilter): Promise<LedgerData> {
           { key: "out", header: "Out", format: "money", align: "right" },
           { key: "balance", header: "Balance", format: "money", align: "right" },
         ],
+        sections,
+        totals,
+      };
+    }
+
+    case "leads": {
+      const rows = (
+        await prisma.lead.findMany({
+          where: { createdAt: dateRange },
+          include: { stage: true },
+        })
+      ).map((l) => ({ ...l, date: l.createdAt }));
+
+      const includeRevenue = !!filter.includeRevenue;
+      const moneyKeys = includeRevenue ? ["value"] : [];
+      const numberKeys = ["qty"];
+
+      const { sections, totals } = groupByDate(
+        rows,
+        (l) => {
+          const value =
+            l.totalBudget ?? (l.brickCount && l.costPerBrick ? l.brickCount * l.costPerBrick : null);
+          return {
+            id: l.id,
+            cells: {
+              customer: l.customerName || "",
+              phone: l.phoneNumber || l.phoneMasked || "",
+              place: l.place || "",
+              stage: l.stage?.name ?? stageLabel(l.quotationStage),
+              brick: l.brickType || "",
+              qty: l.brickCount,
+              source: l.source,
+              followUp: l.followUpDate ? isoDate(l.followUpDate) : "",
+              ...(includeRevenue ? { value } : {}),
+            },
+          };
+        },
+        moneyKeys,
+        numberKeys
+      );
+
+      const columns: LedgerCol[] = [
+        { key: "customer", header: "Customer", format: "text" },
+        { key: "phone", header: "Phone", format: "mono", width: "100px" },
+        { key: "place", header: "Place", format: "muted" },
+        { key: "stage", header: "Stage" },
+        { key: "brick", header: "Brick type", format: "muted" },
+        { key: "qty", header: "Qty", format: "number", align: "right" },
+        { key: "source", header: "Source", format: "muted", width: "70px" },
+        { key: "followUp", header: "Follow-up", format: "muted", width: "80px" },
+      ];
+      if (includeRevenue) {
+        columns.push({ key: "value", header: "Value", format: "money", align: "right" });
+      }
+
+      return {
+        title: "Leads",
+        unit: "leads",
+        moneyKeys,
+        numberKeys,
+        columns,
         sections,
         totals,
       };

@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createConstructionType, updateConstructionType, deleteConstructionType } from "../actions";
 
 export default async function ConstructionTypesPage() {
+  await requireAdmin();
   const rows = await prisma.constructionType.findMany({ orderBy: { order: "asc" } });
   return (
     <>

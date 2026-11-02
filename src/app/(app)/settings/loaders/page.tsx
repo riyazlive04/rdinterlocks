@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createLoader, updateLoader, deleteLoader } from "../actions";
 
 export default async function LoadersPage() {
+  await requireAdmin();
   const rows = await prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } });
   return (
     <>

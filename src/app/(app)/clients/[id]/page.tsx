@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { requireArea } from "@/lib/auth";
+import { can } from "@/lib/access";
 import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate } from "@/lib/format";
@@ -15,6 +17,8 @@ export default async function ClientDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const session = await requireArea("sales");
+  const canQuote = !!session && can(session, "quotations") && can(session, "revenue");
   const client = await prisma.client.findUnique({
     where: { id },
     include: {
@@ -97,6 +101,14 @@ export default async function ClientDetailPage({
             >
               <Icon.Pencil size={15} stroke={2.2} /> Edit
             </Link>
+            {canQuote && (
+              <Link
+                href={`/quotations/new?clientId=${id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-[13px] font-semibold hover:border-slate-400"
+              >
+                <Icon.FileText size={15} stroke={2.2} /> Quote
+              </Link>
+            )}
             <Link
               href={`/clients/${id}/orders/new`}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-red text-white text-[13px] font-semibold shadow-red"

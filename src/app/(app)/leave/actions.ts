@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea } from "@/lib/auth";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 
@@ -23,6 +24,7 @@ const schema = z.object({
 });
 
 export async function createLeaves(input: z.infer<typeof schema>) {
+  await requireArea("leave");
   const p = schema.parse(input);
   const day = new Date(p.date);
   day.setHours(0, 0, 0, 0);
@@ -53,6 +55,7 @@ export async function createLeaves(input: z.infer<typeof schema>) {
 }
 
 export async function deleteLeave(id: string) {
+  await requireArea("leave");
   await prisma.leave.delete({ where: { id } });
   revalidatePath("/leave");
   revalidatePath("/payroll");

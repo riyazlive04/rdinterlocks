@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -14,6 +15,7 @@ export default async function MasonPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string; mason?: string; page?: string }>;
 }) {
+  await requireArea("mason");
   const sp = await searchParams;
   const today = startOfDay();
   const from = sp?.from ? new Date(sp.from) : new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);

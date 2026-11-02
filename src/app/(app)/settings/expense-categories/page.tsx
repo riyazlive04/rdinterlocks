@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import {
@@ -8,6 +9,7 @@ import {
 } from "../actions";
 
 export default async function ExpenseCategoriesPage() {
+  await requireAdmin();
   const rows = await prisma.expenseCategory.findMany({ orderBy: { order: "asc" } });
   return (
     <>

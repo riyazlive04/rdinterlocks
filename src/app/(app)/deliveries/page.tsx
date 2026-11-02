@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { formatINR, formatNumber, formatLongDate, startOfDay } from "@/lib/format";
@@ -16,6 +17,7 @@ export default async function DeliveriesPage({
 }: {
   searchParams: Promise<{ days?: string }>;
 }) {
+  await requireArea("deliveries");
   const sp = await searchParams;
   const days = sp?.days ? Math.max(1, parseInt(sp.days, 10) || 30) : 30;
   const since = new Date(startOfDay().getTime() - (days - 1) * 86400000);

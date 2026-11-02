@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Card, PageHeader, EmptyState, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -14,6 +15,7 @@ export default async function LoadingPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string; worker?: string; page?: string }>;
 }) {
+  await requireArea("loading");
   const sp = await searchParams;
   const today = startOfDay();
   const from = sp?.from ? new Date(sp.from) : new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);

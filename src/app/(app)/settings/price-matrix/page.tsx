@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader, Card } from "@/components/ui";
 import { PriceMatrixEditor } from "./editor";
 import { upsertPrice } from "../actions";
 
 export default async function PriceMatrixPage() {
+  await requireAdmin();
   const [sizes, ctypes, prices] = await Promise.all([
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
     prisma.constructionType.findMany({ orderBy: { order: "asc" } }),

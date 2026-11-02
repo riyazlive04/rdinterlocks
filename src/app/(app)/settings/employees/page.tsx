@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createEmployee, updateEmployee, deleteEmployee } from "../actions";
 
 export default async function EmployeesSettingsPage() {
+  await requireAdmin();
   const rows = await prisma.employee.findMany({ where: { active: true }, orderBy: { name: "asc" } });
   return (
     <>

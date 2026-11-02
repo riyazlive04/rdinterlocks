@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -12,6 +13,7 @@ export default async function ClientsPage({
 }: {
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
+  await requireArea("sales");
   const sp = await searchParams;
   const q = sp?.q?.trim() ?? "";
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireSession } from "@/lib/auth";
 import { Card, PageHeader } from "@/components/ui";
 import { Icon, IconName } from "@/components/icons";
 
@@ -364,7 +365,8 @@ const sections: Array<{
   },
 ];
 
-export default function GuidePage() {
+export default async function GuidePage() {
+  await requireSession();
   return (
     <>
       <PageHeader title="App guide" sub="What goes where, and where to see it" />

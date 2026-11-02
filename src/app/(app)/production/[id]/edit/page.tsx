@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requireArea } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { PageHeader, Card } from "@/components/ui";
 import { ProductionForm } from "../../new/form";
@@ -10,6 +11,7 @@ export default async function EditProductionPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireArea("production");
   const { id } = await params;
   const [entry, sizes, operators, machines, settings, recipes] = await Promise.all([
     prisma.productionEntry.findUnique({ where: { id }, include: { shares: true } }),

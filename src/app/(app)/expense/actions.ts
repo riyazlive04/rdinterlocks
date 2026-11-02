@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -17,6 +18,7 @@ const schema = z.object({
 });
 
 export async function createExpense(input: z.infer<typeof schema>) {
+  await requireArea("expense");
   const p = schema.parse(input);
   const date = new Date(p.date);
   const cat = await prisma.expenseCategory.findUnique({ where: { id: p.categoryId } });
@@ -53,6 +55,7 @@ export async function createExpense(input: z.infer<typeof schema>) {
 }
 
 export async function deleteExpense(id: string) {
+  await requireArea("expense");
   const exp = await prisma.expense.findUnique({ where: { id } });
   if (!exp) return;
   await prisma.$transaction([

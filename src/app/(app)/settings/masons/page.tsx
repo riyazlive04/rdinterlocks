@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { MasterList } from "@/components/master-list";
 import { createMason, updateMason, deleteMason } from "../actions";
 
 export default async function MasonsPage() {
+  await requireAdmin();
   const rows = await prisma.mason.findMany({ where: { active: true }, orderBy: { name: "asc" } });
   return (
     <>

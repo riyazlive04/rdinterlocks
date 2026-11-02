@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -62,6 +63,7 @@ function returnableSize(p: Input) {
 }
 
 export async function createTipperLoad(input: Input) {
+  await requireArea("tipper");
   const p = schema.parse(input);
   const date = new Date(p.date);
 
@@ -116,6 +118,7 @@ export async function createTipperLoad(input: Input) {
 // Edit an existing load. Keeps the linked cash entry and the linked return
 // stock batch in step with whatever changed.
 export async function updateTipperLoad(id: string, input: Input) {
+  await requireArea("tipper");
   const p = schema.parse(input);
   const date = new Date(p.date);
 
@@ -208,6 +211,7 @@ export async function updateTipperLoad(id: string, input: Input) {
 }
 
 export async function deleteTipperLoad(id: string) {
+  await requireArea("tipper");
   const load = await prisma.tipperLoad.findUnique({ where: { id } });
   if (!load) return;
   // Delete the load first; it owns the FKs to the cash entry and return batch.

@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireArea } from "@/lib/auth";
 import { PageHeader, Card } from "@/components/ui";
 import { LoadingMultiForm } from "./multi-form";
 import { createLoadingWork } from "../actions";
 
 export default async function NewLoadingPage() {
+  await requireArea("loading");
   const [loaders, operators, employees, sizes, clients, tippers, vendors] = await Promise.all([
     prisma.loader.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),

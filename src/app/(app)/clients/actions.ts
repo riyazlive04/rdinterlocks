@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea, requireAnyArea } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -15,6 +16,7 @@ const clientSchema = z.object({
 });
 
 export async function createClient(input: z.infer<typeof clientSchema>) {
+  await requireArea("sales");
   const p = clientSchema.parse(input);
   const c = await prisma.client.create({
     data: {
@@ -40,6 +42,7 @@ const clientWithAdvanceSchema = clientSchema.extend({
 export async function createClientWithAdvance(
   input: z.infer<typeof clientWithAdvanceSchema>
 ) {
+  await requireArea("sales");
   const p = clientWithAdvanceSchema.parse(input);
   const c = await prisma.client.create({
     data: {
@@ -79,6 +82,7 @@ export async function createClientWithAdvance(
 }
 
 export async function updateClient(id: string, input: z.infer<typeof clientSchema>) {
+  await requireArea("sales");
   const p = clientSchema.parse(input);
   await prisma.client.update({
     where: { id },
@@ -94,6 +98,7 @@ export async function updateClient(id: string, input: z.infer<typeof clientSchem
 }
 
 export async function deleteClient(id: string) {
+  await requireArea("sales");
   await prisma.client.update({ where: { id }, data: { active: false } });
   revalidatePath("/clients");
 }
@@ -130,6 +135,7 @@ const orderSchema = z
   });
 
 export async function createOrder(input: z.infer<typeof orderSchema>) {
+  await requireArea("sales");
   const p = orderSchema.parse(input);
   const date = new Date(p.date);
   const expected = p.expectedDeliveryDate ? new Date(p.expectedDeliveryDate) : null;
@@ -207,6 +213,7 @@ const orderEditSchema = z
   });
 
 export async function updateOrder(id: string, input: z.infer<typeof orderEditSchema>) {
+  await requireArea("sales");
   const p = orderEditSchema.parse(input);
   const existing = await prisma.order.findUnique({ where: { id } });
   if (!existing) throw new Error("Order not found");
@@ -255,6 +262,7 @@ export async function updateOrder(id: string, input: z.infer<typeof orderEditSch
 // toward the client's paid total while their cash entry was gone. So the
 // payments and their cash entries are removed explicitly, in one transaction.
 export async function deleteOrder(id: string) {
+  await requireArea("sales");
   const order = await prisma.order.findUnique({
     where: { id },
     include: { payments: true },
@@ -394,6 +402,7 @@ async function applyStockDeltas(deltas: Map<string, number>) {
 }
 
 export async function createDelivery(input: z.infer<typeof deliverySchema>) {
+  await requireArea("sales");
   const p = deliverySchema.parse(input);
   const date = new Date(p.date);
   const order = await prisma.order.findUnique({
@@ -490,6 +499,7 @@ const deliveryEditSchema = z.object({
 });
 
 export async function updateDelivery(id: string, input: z.infer<typeof deliveryEditSchema>) {
+  await requireArea("sales");
   const p = deliveryEditSchema.parse(input);
   const existing = await prisma.delivery.findUnique({
     where: { id },
@@ -559,6 +569,7 @@ export async function updateDelivery(id: string, input: z.infer<typeof deliveryE
 
 // Mark (or unmark) a delivery as done — used by the evening deliveries review.
 export async function setDeliveryDone(id: string, done: boolean) {
+  await requireAnyArea(["sales", "deliveries"]);
   await prisma.delivery.update({
     where: { id },
     data: { completedAt: done ? new Date() : null },
@@ -567,6 +578,7 @@ export async function setDeliveryDone(id: string, done: boolean) {
 }
 
 export async function deleteDelivery(id: string) {
+  await requireArea("sales");
   const d = await prisma.delivery.findUnique({
     where: { id },
     include: { order: true, items: true, returns: true },
@@ -615,6 +627,7 @@ const paymentSchema = z.object({
 });
 
 export async function recordPayment(input: z.infer<typeof paymentSchema>) {
+  await requireArea("sales");
   const p = paymentSchema.parse(input);
   const client = await prisma.client.findUnique({ where: { id: p.clientId } });
   if (!client) throw new Error("Client not found");

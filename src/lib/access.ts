@@ -18,6 +18,16 @@ export const ACCESS_AREAS = [
   { key: "cash", label: "Cashbook" },
   { key: "reports", label: "Reports" },
   { key: "vehicles", label: "Vehicles & EMI" },
+  { key: "whatsapp", label: "WhatsApp nurturing" },
+  { key: "quotations", label: "Quotations" },
+  // Split from `quotations` on purpose. Reviewing and sending a quotation
+  // move a status and write no amounts, so a telecaller can hold these
+  // without `revenue` — the same reasoning that already lets
+  // markQuotationSent run without price access while generateQuotation
+  // cannot.
+  { key: "quoteReview", label: "Review & approve quotations" },
+  { key: "quoteSend", label: "Send approved quotations" },
+  { key: "leadIntake", label: "Lead intake log & replay" },
   { key: "revenue", label: "See revenue, profit & cash totals" },
 ] as const;
 

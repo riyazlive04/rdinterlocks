@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireArea } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -16,6 +17,7 @@ const schema = z.object({
 });
 
 export async function createManualCashEntry(input: z.infer<typeof schema>) {
+  await requireArea("cash");
   const p = schema.parse(input);
   await prisma.cashEntry.create({
     data: {
@@ -35,6 +37,7 @@ export async function createManualCashEntry(input: z.infer<typeof schema>) {
 }
 
 export async function deleteCashEntry(id: string) {
+  await requireArea("cash");
   // Delete the cash entry AND its linked source record (client payment,
   // expense, advance, payout, tipper rent) so a wrongly double-entered row can
   // be fully removed without leaving an orphaned record. Manual entries have no

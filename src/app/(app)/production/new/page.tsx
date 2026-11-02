@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { requireArea } from "@/lib/auth";
 import { PageHeader, Card } from "@/components/ui";
 import { ProductionForm } from "./form";
 import { createProduction } from "../actions";
 
 export default async function NewProductionPage() {
+  await requireArea("production");
   const [sizes, operators, machines, settings, recipes] = await Promise.all([
     prisma.brickSize.findMany({ orderBy: { order: "asc" } }),
     prisma.operator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
