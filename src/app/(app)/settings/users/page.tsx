@@ -5,13 +5,9 @@ import { ACCESS_AREAS } from "@/lib/access";
 import { UsersManager } from "./manager";
 import { createUser, updateUser, deleteUser } from "../actions";
 
-// createUser/updateUser still validate the role with their own zod enum in
-// ../actions.ts, which predates the six-role hierarchy and lists only
-// admin | manager | telecaller | staff. The form below now offers all of
-// ROLES, so the role is widened to whatever that enum accepts to keep this
-// page type-correct. Widening the enum itself (to add owner and supervisor)
-// belongs in settings/actions.ts, which this change does not own — until
-// that happens, saving a user as "supervisor" or "owner" is rejected there.
+// The role accepted by createUser/updateUser, taken from their own zod enum
+// rather than restated here, so the form can never offer a role the action
+// would reject. That enum is now derived from ROLES, so all six are valid.
 type ActionRole = Parameters<typeof createUser>[0]["role"];
 
 export default async function UsersPage() {
