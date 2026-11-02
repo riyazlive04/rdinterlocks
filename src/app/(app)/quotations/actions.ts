@@ -4,14 +4,21 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { requireArea } from "@/lib/auth";
+import { requireArea, requireSession } from "@/lib/auth";
 import { can, isAdmin } from "@/lib/access";
+import { isFullAccess } from "@/lib/roles";
 import {
   financialYearLabel,
   nextQuotationNumber,
-  convertQuotationToOrder,
+  isQuotationExpired,
   resolveQuotationItems,
+  syncLeadWonForQuotation,
 } from "@/lib/quote";
+import {
+  approveQuotationPayment,
+  recordQuotationPayment,
+  rejectQuotationPayment,
+} from "@/lib/quote-payment";
 import { canEditDraft, isLockedStatus, nextStatusOnSubmit } from "@/lib/quote-review";
 import { freezeQuotationPdf } from "@/lib/quote-document";
 import { resolveStageBySlug, triggerWaSequencesForStage } from "@/lib/lead-stage";
@@ -81,9 +88,9 @@ async function resolveCustomer(p: QuoteInput) {
     if (!client) throw new Error("Client not found.");
     return { customerName: client.name, customerPhone: client.phone ?? "", place: client.location ?? "" };
   }
-  // Manual entry — no lead/client record at all. convertQuotationToOrder
-  // already handles clientId being null by creating a Client from these
-  // same snapshotted fields at acceptance time.
+  // Manual entry — no lead/client record at all. The conversion that runs
+  // when a manager approves the payment already handles clientId being null,
+  // by creating a Client from these same snapshotted fields.
   return {
     customerName: p.customerName?.trim() ?? "",
     customerPhone: p.customerPhone?.trim() ?? "",
@@ -495,17 +502,141 @@ export async function rejectQuotation(id: string) {
   revalidatePath(`/quotations/${id}`);
 }
 
+/**
+ * Record that the customer agreed to this quotation. It no longer creates an
+ * order.
+ *
+ * Acceptance used to call convertQuotationToOrder, so an Order — and with it
+ * a job in the supervisor's production queue — existed before anyone had
+ * checked that the money had arrived. The order is now created by a manager
+ * approving the payment (lib/quote-payment.ts). Accepting means one thing:
+ * the customer said yes, so record the payment next.
+ *
+ * It still writes no amounts itself, but it stays behind the `revenue` gate
+ * rather than the bare `quotations` area: accepting commits the factory to
+ * this document's frozen prices, and it is the step that opens the payment
+ * form, so the person doing it has to be allowed to see the figures they are
+ * committing to. markQuotationSent and rejectQuotation remain `quotations`
+ * only, so a telecaller without price access can still record those.
+ */
 export async function acceptQuotation(id: string) {
-  // Acceptance WRITES money: it creates an Order carrying this quotation's
-  // frozen prices. It therefore needs the same `revenue` gate as generating
-  // and revising, not just the `quotations` area — unlike markQuotationSent
-  // and rejectQuotation below, which only move a status and write no amounts,
-  // so a telecaller without price access can still record those.
   await requireQuotationWrite();
-  const clientId = await convertQuotationToOrder(id);
+  const q = await prisma.quotation.findUnique({ where: { id }, include: { items: true } });
+  if (!q) throw new Error("Quotation not found.");
+  if (q.status === "accepted") throw new Error("This quotation has already been accepted.");
+  if (q.status !== "sent") {
+    throw new Error(
+      q.status === "rejected"
+        ? "This quotation was rejected. Revise it and send the new revision."
+        : "Only a quotation the customer has been given can be accepted. Mark it as sent first."
+    );
+  }
+  if (q.supersededById) throw new Error("This quotation has already been superseded by a later revision.");
+  if (q.items.length === 0) throw new Error("This quotation has no line items.");
+  // Checked here as well as in convertQuotationToOrderTx, because acceptance
+  // no longer runs that function: the prices on this document were only
+  // promised until validUntil, so an expired quote has to be revised rather
+  // than accepted at a stale rate.
+  if (isQuotationExpired(q)) {
+    throw new Error(
+      `This quotation expired on ${q.validUntil!.toLocaleDateString("en-IN")}. ` +
+        `Revise it to pick up current prices, then accept the new revision.`
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Optimistic claim, so two people clicking Accept do not both run the
+    // lead sync below.
+    const claimed = await tx.quotation.updateMany({
+      where: { id, status: "sent" },
+      data: { status: "accepted" },
+    });
+    if (claimed.count === 0) {
+      throw new Error("This quotation was already accepted by someone else a moment ago.");
+    }
+    // The pipeline moves on acceptance, not on payment approval — a customer
+    // who has already agreed must not keep receiving nurture messages while a
+    // manager checks the money. Idempotent, so the conversion's own call to
+    // it later writes nothing further.
+    if (q.leadId) await syncLeadWonForQuotation(tx, q.leadId);
+  });
+
   revalidatePath("/quotations");
   revalidatePath(`/quotations/${id}`);
+  if (q.leadId) {
+    revalidatePath("/leads");
+    revalidatePath("/leads/board");
+    revalidatePath(`/leads/${q.leadId}`);
+  }
+  // Deliberately no redirect: the next step is on this page — record the
+  // payment the customer made — and bouncing the user elsewhere is what made
+  // the old flow feel finished when it was not.
+}
+
+// ─── Payment approval gate ───────────────────────────────────────────────
+//
+// Thin wrappers over lib/quote-payment.ts, which holds the rules. Recording a
+// payment is part of closing the sale, so it takes the `quotations` area.
+// Approving or rejecting one is a manager/owner act and is gated on the ROLE
+// via isFullAccess: no granted area substitutes for it, because the entire
+// point of the gate is that the person who closed the sale is not the person
+// who confirms the money arrived.
+
+const paymentSchema = z.object({
+  amount: z.number().positive(),
+  method: z.enum(["cash", "gpay", "bank", "upi", "cheque"]).default("cash"),
+  reference: z.string().optional().default(""),
+  /** Date input value ("yyyy-mm-dd"); absent means "paid today". */
+  paidAt: z.string().optional(),
+  notes: z.string().optional().default(""),
+});
+
+type PaymentRawInput = z.input<typeof paymentSchema>;
+
+/** Every screen the approval gate shows money on. */
+function revalidatePayments(quotationId: string) {
+  revalidatePath("/quotations");
+  revalidatePath(`/quotations/${quotationId}`);
+  revalidatePath("/payments");
   revalidatePath("/clients");
-  revalidatePath(`/clients/${clientId}`);
-  redirect(`/clients/${clientId}`);
+}
+
+export async function recordPaymentAction(quotationId: string, input: PaymentRawInput): Promise<void> {
+  const session = await requireArea("quotations");
+  const p = paymentSchema.parse(input);
+  await recordQuotationPayment(
+    quotationId,
+    {
+      amount: p.amount,
+      method: p.method,
+      reference: p.reference,
+      paidAt: p.paidAt ? new Date(p.paidAt) : undefined,
+      notes: p.notes,
+    },
+    session.userId
+  );
+  revalidatePayments(quotationId);
+}
+
+/** Manager/owner only — this is the act that creates the order. */
+export async function approvePaymentAction(paymentId: string, note?: string): Promise<void> {
+  const session = await requireSession();
+  if (!isFullAccess(session.role)) {
+    throw new Error("Only a manager or the owner can approve a payment.");
+  }
+  const result = await approveQuotationPayment(paymentId, session.userId, note);
+  revalidatePayments(result.quotationId);
+  revalidatePath(`/clients/${result.clientId}`);
+  revalidatePath("/production");
+  revalidatePath("/cash");
+}
+
+/** Manager/owner only. The note is required — see rejectQuotationPayment. */
+export async function rejectPaymentAction(paymentId: string, note: string): Promise<void> {
+  const session = await requireSession();
+  if (!isFullAccess(session.role)) {
+    throw new Error("Only a manager or the owner can reject a payment.");
+  }
+  const quotationId = await rejectQuotationPayment(paymentId, session.userId, note);
+  revalidatePayments(quotationId);
 }

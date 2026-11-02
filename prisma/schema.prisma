@@ -22,10 +22,87 @@ model User {
   assignedTasks Task[] @relation("TaskAssignee")
   createdTasks  Task[] @relation("TaskCreator")
 
-  ownedLeads        Lead[]          @relation("LeadOwner")
+  ownedLeads        Lead[]            @relation("LeadOwner")
   leadActivities    LeadActivity[]
-  submittedQuotes   Quotation[]     @relation("QuoteSubmitter")
-  reviewedQuotes    Quotation[]     @relation("QuoteReviewer")
+  submittedQuotes   Quotation[]       @relation("QuoteSubmitter")
+  reviewedQuotes    Quotation[]       @relation("QuoteReviewer")
+  dutySessions      DutySession[]
+  recordedPayments  QuotationPayment[] @relation("PaymentRecorder")
+  reviewedPayments  QuotationPayment[] @relation("PaymentReviewer")
+  approvedOrders    Order[]           @relation("OrderApprover")
+}
+
+// Who is on the phone right now, since when, and from where.
+//
+// The requirement this answers is routing, not timekeeping: leads can only be
+// handed to the right telecaller if the app knows which of them is actually
+// working, so an open session is what makes someone eligible to receive one.
+// It replaced an earlier "rotate every 15 calls" idea because the real shift
+// is not a fixed number of calls — one telecaller may take twenty and the
+// next thirty — so presence, not a counter, is what has to be visible.
+//
+// Append-only in spirit: closing a shift sets `endedAt` rather than deleting
+// the row, so the day's coverage can be reconstructed afterwards.
+model DutySession {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  startedAt DateTime  @default(now())
+  /// Null = still on duty. At most one open session per user is enforced in
+  /// the action that opens one, not by a constraint, because Postgres cannot
+  /// express "unique where endedAt is null" through Prisma's schema.
+  endedAt   DateTime?
+
+  /// Where they are working from — "Factory office", "Home", a branch name.
+  /// Free text: the factory adds desks and locations faster than a migration.
+  location String @default("")
+  note     String @default("")
+
+  @@index([userId, startedAt])
+  @@index([endedAt])
+}
+
+// A customer payment recorded against a QUOTATION, before any order exists.
+//
+// This is the gate the owner asked for: a telecaller records what the
+// customer paid, a manager checks it against the bank or the cash box, and
+// only an approved payment turns the quotation into an Order that reaches the
+// supervisor's production queue. Nothing goes into production unpaid and
+// unchecked.
+//
+// Deliberately NOT ClientPayment: that model books money against an existing
+// Order and Client and feeds the cashbook, which is exactly what must not
+// happen until a human has verified the money arrived. On approval the
+// approved row is copied into a real ClientPayment against the new order, so
+// the cashbook still sees one authoritative entry.
+model QuotationPayment {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  amount Float
+  method String @default("cash") // cash | gpay | bank | upi | cheque
+  /// UTR, cheque number, screenshot reference — whatever lets the manager
+  /// find this payment in the bank statement.
+  reference String @default("")
+  paidAt    DateTime @default(now())
+  notes     String   @default("")
+
+  /// pending | approved | rejected
+  status String @default("pending")
+
+  recordedByUserId String?
+  recordedBy       User?    @relation("PaymentRecorder", fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  recordedAt       DateTime @default(now())
+
+  reviewedByUserId String?
+  reviewedBy       User?     @relation("PaymentReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  reviewedAt       DateTime?
+  reviewNote       String    @default("")
+
+  @@index([quotationId])
+  @@index([status])
 }
 
 // A to-do the admin assigns to another user (manager / telecaller / staff).
@@ -691,6 +768,21 @@ model Order {
   expectedDeliveryDate DateTime?
   status      String   @default("open") // open | partial | complete | cancelled
   notes       String?
+
+  // Set when a manager approved the payment that created this order. Null on
+  // orders made before the approval gate existed, and on any created by a
+  // direct sale rather than through a quotation — so a null here means
+  // "unknown", never "unapproved".
+  approvedByUserId String?
+  approvedBy       User?     @relation("OrderApprover", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedAt       DateTime?
+
+  /// The supervisor's view of the order, tracked separately from `status`
+  /// because that one is driven by delivery progress and is not theirs to
+  /// move: queued | in_production | ready | dispatched.
+  fulfilmentStage String   @default("queued")
+  /// When the stage last changed — drives "waiting since" on the queue.
+  stageChangedAt  DateTime @default(now())
 
   items     OrderItem[]
   slabItems OrderSlabItem[]
@@ -1399,6 +1491,7 @@ model Quotation {
 
   items    QuotationItem[]
   document QuotationDocument?
+  payments QuotationPayment[]
 
   @@index([leadId])
   @@index([clientId])

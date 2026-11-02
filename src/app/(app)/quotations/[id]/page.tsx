@@ -1,20 +1,24 @@
 import Link from "next/link";
+import clsx from "clsx";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { effectiveQuotationStatus } from "@/lib/quote";
 import { requireArea } from "@/lib/auth";
 import { can } from "@/lib/access";
 import { Card, PageHeader, Pill } from "@/components/ui";
-import { formatINR, formatLongDate, formatNumber } from "@/lib/format";
+import { formatINR, formatISODate, formatLongDate, formatNumber } from "@/lib/format";
 import { statusLabel, statusTone } from "@/lib/quote-review";
+import { paymentMethodLabel, paymentStatusLabel, paymentStatusTone, paymentTotals } from "@/lib/quote-payment";
 import { quotationWhatsappText } from "../send/message";
 import { QuotationControls } from "./controls";
+import { RecordPaymentForm } from "../../payments/record-form";
 import {
   markQuotationSent,
   acceptQuotation,
   rejectQuotation,
   submitQuotationForReview,
   queueQuotationForSend,
+  recordPaymentAction,
 } from "../actions";
 
 export default async function QuotationDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,6 +37,23 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
       supersededBy: { select: { id: true, number: true } },
       submittedBy: { select: { name: true } },
       reviewedBy: { select: { name: true } },
+      // The order, if a manager's approval has created one yet. Its presence
+      // IS the answer to "has this reached production", so the page reads it
+      // rather than inferring it from the quotation's status.
+      order: {
+        select: {
+          id: true,
+          clientId: true,
+          approvedAt: true,
+          fulfilmentStage: true,
+          approvedBy: { select: { name: true } },
+        },
+      },
+      // Newest first: the one just recorded is the one being looked for.
+      payments: {
+        orderBy: [{ recordedAt: "desc" }],
+        include: { recordedBy: { select: { name: true } }, reviewedBy: { select: { name: true } } },
+      },
       // Never the `pdf` bytes — the document is served by /api/quote/<id>/pdf;
       // this page only needs to say WHICH file is pinned.
       document: { select: { sha256: true, byteSize: true, renderedAt: true } },
@@ -47,6 +68,13 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
   // Same builder the send list uses, so the text the reviewer reads here is
   // the text the telecaller pastes from the queue.
   const whatsappText = quotationWhatsappText(quotation, canRevenue);
+
+  // The payment gate. Shown once the customer has accepted, and also whenever
+  // a payment has already been recorded, so a payment against a `sent`
+  // quotation never becomes invisible.
+  const showPayments = quotation.status === "accepted" || quotation.payments.length > 0;
+  const totals = showPayments ? await paymentTotals(quotation.id) : null;
+  const awaitingApproval = quotation.payments.some((p) => p.status === "pending");
 
   const trail = [
     quotation.submittedAt,
@@ -180,6 +208,7 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
             documentRenderedAtLabel={
               quotation.document ? formatLongDate(quotation.document.renderedAt) : null
             }
+            orderCreated={!!quotation.order}
             onSubmitForReview={submitQuotationForReview}
             onQueueForSend={queueQuotationForSend}
             onMarkSent={markQuotationSent}
@@ -261,6 +290,120 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
             </Card>
           )}
         </div>
+
+        {showPayments && (
+          <Card className="lg:col-span-2">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <div className="text-base font-bold text-ink">Payments</div>
+              {quotation.order ? (
+                <Pill tone="success">Order created</Pill>
+              ) : (
+                <Pill tone="warning">No order yet</Pill>
+              )}
+            </div>
+
+            {/* The single most surprising part of this flow for the person who
+                just closed the sale: accepting the quotation did NOT create an
+                order. It is stated in full, at the top of the card, rather
+                than left to be inferred from a pill. */}
+            {quotation.order ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[13px] text-emerald-900">
+                <span className="font-semibold">
+                  A manager approved the payment, so the order exists and production has it.
+                </span>{" "}
+                {quotation.order.approvedBy?.name ? `Approved by ${quotation.order.approvedBy.name}` : "Approved"}
+                {quotation.order.approvedAt ? ` on ${formatLongDate(quotation.order.approvedAt)}` : ""} ·{" "}
+                {quotation.order.fulfilmentStage.replace(/_/g, " ")}
+                {". "}
+                <Link
+                  href={`/clients/${quotation.order.clientId}`}
+                  className="font-semibold underline"
+                >
+                  Open the client
+                </Link>
+                . Any further payment is recorded against the order there, not here.
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900">
+                <span className="font-semibold">No order exists yet.</span> Accepting a quotation does not create
+                one. Record what the customer paid below; a{" "}
+                <span className="font-semibold">manager has to approve that payment</span>, and their approval is
+                what creates the order and sends the job to production.
+                {awaitingApproval && (
+                  <>
+                    {" "}
+                    A payment is <span className="font-semibold">waiting in the approval queue</span> now — nothing
+                    is being made until it is approved.
+                  </>
+                )}
+              </div>
+            )}
+
+            {canRevenue && totals && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                <Money label="Quoted" value={formatINR(totals.quotationTotal)} />
+                <Money label="Approved" value={formatINR(totals.approved)} tone="emerald" />
+                <Money label="Awaiting approval" value={formatINR(totals.pending)} tone="amber" />
+                <Money
+                  label={totals.balance < 0 ? "Overpaid" : "Balance"}
+                  value={formatINR(Math.abs(totals.balance))}
+                  tone={totals.balance > 0 ? "amber" : "emerald"}
+                />
+              </div>
+            )}
+            {canRevenue && totals && totals.balance > 0 && totals.approved > 0 && (
+              <div className="text-[11px] text-slate-500 mt-1.5">
+                Part payment — {formatINR(totals.balance)} of the quoted amount is still outstanding.
+              </div>
+            )}
+
+            {quotation.payments.length > 0 && (
+              <div className="divide-y divide-slate-100 mt-3 border-t border-slate-100">
+                {quotation.payments.map((p) => (
+                  <div key={p.id} className="py-2.5 flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Pill tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Pill>
+                        <Pill tone="slate">{paymentMethodLabel(p.method)}</Pill>
+                        <span className="text-[11px] text-slate-500">{formatLongDate(p.paidAt)}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        Recorded by {p.recordedBy?.name ?? "—"}
+                        {p.reference ? ` · ref ${p.reference}` : ""}
+                      </div>
+                      {p.status !== "pending" && (
+                        <div className="text-[11px] text-slate-500">
+                          {p.status === "approved" ? "Approved" : "Rejected"} by {p.reviewedBy?.name ?? "—"}
+                          {p.reviewedAt ? ` on ${formatLongDate(p.reviewedAt)}` : ""}
+                          {p.reviewNote ? ` — ${p.reviewNote}` : ""}
+                        </div>
+                      )}
+                      {p.notes && <div className="text-[11px] text-slate-600 mt-1 whitespace-pre-wrap">{p.notes}</div>}
+                    </div>
+                    {canRevenue && <div className="num font-bold text-ink">{formatINR(p.amount)}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Recording is part of closing the sale, so it needs only the
+                `quotations` area this page already requires — not `revenue`.
+                The amount typed here is money the customer handed over, not
+                the factory's prices, which is why the suggested figure (and
+                only it) is held back from someone without price access. */}
+            {!quotation.order && quotation.status === "accepted" && (
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <div className="text-[13px] font-semibold text-ink mb-2">Record payment</div>
+                <RecordPaymentForm
+                  quotationId={quotation.id}
+                  defaultPaidAt={formatISODate(new Date())}
+                  suggestedAmount={canRevenue && totals && totals.balance > 0 ? totals.balance : 0}
+                  onRecord={recordPaymentAction}
+                />
+              </div>
+            )}
+          </Card>
+        )}
       </div>
     </>
   );
@@ -271,6 +414,32 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
     <div>
       <dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</dt>
       <dd className="text-[13px] text-ink font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function Money({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "amber" | "emerald";
+}) {
+  return (
+    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
+      <div
+        className={clsx(
+          "num text-[14px] font-bold",
+          tone === "amber" && "text-amber-700",
+          tone === "emerald" && "text-emerald-700",
+          tone === "default" && "text-ink"
+        )}
+      >
+        {value}
+      </div>
     </div>
   );
 }

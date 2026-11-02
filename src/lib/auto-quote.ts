@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { can } from "./access";
+import { listOnDuty, nextOnDutyTelecaller } from "./duty";
 import { financialYearLabel, nextQuotationNumber, resolveQuotationItems } from "./quote";
 
 // Scheduled automation for the sales desk: auto-DRAFTING quotations, sweeping
@@ -323,46 +324,61 @@ export async function sweepExpiredQuotations(): Promise<{ expired: number }> {
 }
 
 /**
- * Give unassigned open leads an owner, round-robin across the active users who
- * hold the `leads` area (admins count — `can` grants them everything).
+ * Give unassigned open leads an owner — handing each one to a telecaller who
+ * is ACTUALLY ON THE PHONES, and to nobody otherwise.
  *
- * Why this exists: ~753 of 833 leads are Meta-sourced and not one of them has
- * an owner, so "who is working this?" has no answer for 90% of the pipeline.
+ * Why this is no longer "every active user with the `leads` area": that set
+ * includes the telecaller who went home at six, the one on leave, and the
+ * owner who holds every area by role. Routing to them is worse than not
+ * routing at all — the lead looks handled, sits in somebody's queue
+ * unanswered, and the ~753 ownerless Meta leads this function exists for are
+ * replaced by a subtler version of the same problem. An OPEN DutySession is
+ * the eligibility rule (see lib/duty.ts): on duty means a human is there to
+ * pick up the phone, which is the only claim an assignment actually makes.
  *
- * The rotation has to survive process restarts, so instead of keeping a cursor
- * anywhere it SEEDS each user's counter with how many open leads they already
- * own and then repeatedly hands the next lead to the least-loaded user (ties
- * broken by a stable user order: createdAt, then id). Over any number of
- * invocations that converges on an even split, and a run that crashes halfway
- * resumes correctly on the next firing because the counts are read back from
- * the leads themselves.
+ * How the batch is spread:
+ *   - The FIRST lead goes to nextOnDutyTelecaller(), so a sweep that finds
+ *     one lead gives exactly the answer the duty board shows as "next in
+ *     line" — least-loaded, longest-waiting, stable id order.
+ *   - The rest continue ROUND THE ON-DUTY LIST from that person, in
+ *     listOnDuty()'s order. Starting from the least-loaded and walking the
+ *     ring spreads a batch evenly without re-querying every lead's worth of
+ *     load, which at a 200-lead cap is the difference between two queries and
+ *     four hundred. The ring position is local to this invocation: there is
+ *     still no cursor stored anywhere, so a run that dies halfway resumes
+ *     correctly on the next firing because the next first-pick is recomputed
+ *     from the leads themselves.
+ *
+ * When NOBODY is on duty, nothing is assigned and the reason is returned.
+ * That is a deliberate, visible no-op in the same spirit as
+ * autoDraftQuotations' `skipped` map: the failure mode of automation like
+ * this is a silent nothing, where the sweep "ran", no lead moved, and no
+ * screen says why. The duty board states the same consequence out loud.
  */
-export async function autoAssignLeads(): Promise<{ assigned: number }> {
+export async function autoAssignLeads(): Promise<{ assigned: number; skipped?: string }> {
   let assigned = 0;
   try {
     const settings = await prisma.settings.findUnique({ where: { id: "default" } });
-    if (!settings?.leadAutoAssign) return { assigned: 0 };
+    if (!settings?.leadAutoAssign) return { assigned: 0, skipped: "auto-assign-disabled" };
 
-    const users = (
-      await prisma.user.findMany({
-        where: { active: true },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: { id: true, role: true, permissions: true },
-      })
-    ).filter((u) => can(u, "leads"));
-    if (users.length === 0) return { assigned: 0 }; // nobody to assign to
-
-    const openCounts = await prisma.lead.groupBy({
-      by: ["ownerUserId"],
-      where: { status: "open", ownerUserId: { not: null } },
-      _count: { _all: true },
-    });
-    const load = new Map(users.map((u) => [u.id, 0]));
-    for (const row of openCounts) {
-      if (row.ownerUserId && load.has(row.ownerUserId)) {
-        load.set(row.ownerUserId, row._count._all);
-      }
+    // Same eligibility test nextOnDutyTelecaller applies, so the ring and the
+    // first pick can never be drawn from different pools: an open session, an
+    // active account, and the `leads` area (`can` grants admins/managers
+    // everything, so an owner covering the phones is routable).
+    const seen = new Set<string>();
+    const onDuty = await listOnDuty();
+    const pool: { id: string; name: string }[] = [];
+    for (const s of onDuty) {
+      if (!s.user.active || !can(s.user, "leads") || seen.has(s.user.id)) continue;
+      seen.add(s.user.id);
+      pool.push({ id: s.user.id, name: s.user.name });
     }
+    if (pool.length === 0) return { assigned: 0, skipped: "nobody-on-duty" };
+
+    const first = await nextOnDutyTelecaller();
+    // null here would mean the pool emptied between the two reads (somebody
+    // clocked out mid-sweep). Treated as "nobody on duty", never as an error.
+    if (!first) return { assigned: 0, skipped: "nobody-on-duty" };
 
     const leads = await prisma.lead.findMany({
       where: { status: "open", ownerUserId: null },
@@ -370,25 +386,27 @@ export async function autoAssignLeads(): Promise<{ assigned: number }> {
       take: ASSIGN_BATCH_SIZE,
       select: { id: true },
     });
+    if (leads.length === 0) return { assigned: 0, skipped: "nothing-unassigned" };
+
+    const startAt = pool.findIndex((u) => u.id === first.id);
+    let cursor = startAt >= 0 ? startAt : 0;
 
     for (const lead of leads) {
       try {
-        let target = users[0].id;
-        for (const u of users) {
-          if ((load.get(u.id) ?? 0) < (load.get(target) ?? 0)) target = u.id;
-        }
+        const target = pool[cursor % pool.length];
 
-        // Optimistic claim, same shape as convertLeadCore's: re-stating
-        // `ownerUserId: null` in the filter means two overlapping sweeps (or a
-        // human assigning the lead a moment ago) can never both win — the
-        // loser matches zero rows and is simply not counted.
+        // Optimistic claim, unchanged: re-stating `ownerUserId: null` in the
+        // filter means two overlapping sweeps (or a human assigning the lead a
+        // moment ago) can never both win — the loser matches zero rows and is
+        // simply not counted. The cursor is NOT advanced on a loss, so a
+        // contended lead does not cost this telecaller their turn.
         const claimed = await prisma.lead.updateMany({
           where: { id: lead.id, ownerUserId: null },
-          data: { ownerUserId: target },
+          data: { ownerUserId: target.id },
         });
         if (claimed.count === 0) continue;
 
-        load.set(target, (load.get(target) ?? 0) + 1);
+        cursor++;
         assigned++;
         await prisma.leadActivity.create({
           data: {
@@ -396,7 +414,7 @@ export async function autoAssignLeads(): Promise<{ assigned: number }> {
             userId: null, // assigned by the scheduler, not by a person
             kind: "assign",
             outcome: "auto-assign",
-            note: "Assigned automatically (round-robin).",
+            note: `Assigned automatically to ${target.name}, who is on duty (round-robin across the ${pool.length} telecaller${pool.length === 1 ? "" : "s"} on duty).`,
           },
         });
       } catch (e) {

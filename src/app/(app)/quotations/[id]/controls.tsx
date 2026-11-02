@@ -26,6 +26,7 @@ export function QuotationControls({
   queued,
   documentSha256,
   documentRenderedAtLabel,
+  orderCreated,
   onSubmitForReview,
   onQueueForSend,
   onMarkSent,
@@ -44,6 +45,11 @@ export function QuotationControls({
   documentSha256: string | null;
   /** Pre-formatted on the server; a client component must not format dates. */
   documentRenderedAtLabel: string | null;
+  /**
+   * Whether a manager has approved a payment and the Order now exists.
+   * Accepted no longer implies this — the whole point of the payment gate.
+   */
+  orderCreated: boolean;
   onSubmitForReview: (id: string, note?: string) => Promise<void>;
   onQueueForSend: (id: string) => Promise<void>;
   onMarkSent: (id: string, input: { channel: SentChannel }) => Promise<void>;
@@ -106,14 +112,17 @@ export function QuotationControls({
   };
 
   const accept = () => {
-    if (!confirm("Convert this quotation into an order?")) return;
+    if (!confirm("Mark this quotation as accepted by the customer?")) return;
     setError(null);
     startTransition(async () => {
       try {
         await onAccept(id);
+        // Acceptance no longer redirects to the client — there is no order and
+        // may be no client yet. The next step (recording the payment) is on
+        // this page, so refresh in place.
+        router.refresh();
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "Could not accept";
-        if (!msg.includes("NEXT_REDIRECT")) setError(msg);
+        setError(e instanceof Error ? e.message : "Could not accept");
       }
     });
   };
@@ -248,13 +257,37 @@ export function QuotationControls({
         )}
 
         {status === "sent" && (
-          <div className="flex gap-2 pt-1">
-            <Button onClick={accept} disabled={isPending} variant="primary" className="flex-1">
-              <Icon.Check size={15} /> Accept → convert to order
-            </Button>
-            <Button onClick={reject} disabled={isPending} variant="ghost">
-              Reject
-            </Button>
+          <>
+            <div className="flex gap-2 pt-1">
+              <Button onClick={accept} disabled={isPending} variant="primary" className="flex-1">
+                <Icon.Check size={15} /> Customer accepted
+              </Button>
+              <Button onClick={reject} disabled={isPending} variant="ghost">
+                Reject
+              </Button>
+            </div>
+            {/* The button used to say "convert to order", and it did. It no
+                longer does: the order is created when a manager approves the
+                customer's payment, so saying so here is the only thing
+                stopping someone from assuming production has the job. */}
+            <div className="text-[10px] text-slate-400 px-1">
+              This does not create an order. Record the customer&rsquo;s payment next — a manager approves it, and
+              that is what creates the order.
+            </div>
+          </>
+        )}
+
+        {status === "accepted" && !orderCreated && (
+          <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-[13px] font-semibold text-amber-900">
+            <Icon.Cash size={15} />
+            <span>Record the payment in the Payments card — no order exists until a manager approves it.</span>
+          </div>
+        )}
+
+        {status === "accepted" && orderCreated && (
+          <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-[13px] font-semibold text-emerald-900">
+            <Icon.Check size={15} />
+            <span>Payment approved and the order has been created.</span>
           </div>
         )}
       </div>

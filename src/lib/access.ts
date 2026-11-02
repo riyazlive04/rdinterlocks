@@ -35,11 +35,43 @@ export type AreaKey = (typeof ACCESS_AREAS)[number]["key"];
 
 export type AccessUser = { role: string; permissions: string[] };
 
+/**
+ * Unrestricted access.
+ *
+ * `manager` now sits alongside owner/admin: the factory runs with the owner
+ * and the manager seeing the same system, and a manager who could not price a
+ * quotation or open Settings could not cover for the owner. They stay
+ * separate ROLE STRINGS because the task hierarchy in lib/roles.ts still has
+ * to tell them apart — an owner assigns work to a manager, never the reverse.
+ *
+ * The name is kept as isAdmin() because ~20 call sites across the app read
+ * "is this user unrestricted"; lib/roles.ts exports isFullAccess() as the
+ * clearer name for new code, and isOwner() for anything that must outrank a
+ * manager.
+ */
 export function isAdmin(role: string) {
-  return role === "admin" || role === "owner";
+  return role === "admin" || role === "owner" || role === "manager";
 }
 
 export function can(user: AccessUser, area: string) {
   if (isAdmin(user.role)) return true;
   return user.permissions.includes(area);
 }
+
+/**
+ * Areas granted to a role by default when a user is created. Not a ceiling —
+ * an owner can grant any area to anyone from Settings -> Users; this is only
+ * the sensible starting point so a new supervisor or telecaller is useful
+ * immediately instead of seeing an empty app.
+ */
+export const DEFAULT_AREAS_BY_ROLE: Record<string, string[]> = {
+  // Everything, via isAdmin — listing areas here would be misleading.
+  owner: [],
+  admin: [],
+  manager: [],
+  // Runs production and gets stock out of the godown.
+  supervisor: ["production", "day", "deliveries", "loading", "tipper", "mason", "sales"],
+  // Works the phone: leads, the quotations they raise, and sending them.
+  telecaller: ["leads", "quotations", "quoteSend", "whatsapp"],
+  staff: [],
+};

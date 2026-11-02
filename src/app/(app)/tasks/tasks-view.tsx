@@ -10,25 +10,37 @@ export type TaskDTO = {
   title: string;
   details: string | null;
   status: string;
+  statusReason: string | null; // why it is parked, if anyone said
   dueDate: string | null; // ISO date or null
   assignedToName: string;
+  assigneeRoleLabel: string;
   createdByName: string | null;
+  // Decided on the server from the assignee's stored role (see page.tsx).
+  // These only hide controls; every action re-checks the hierarchy itself.
+  isMine: boolean;
+  canManage: boolean;
+  canReassign: boolean;
+  canRemove: boolean;
 };
-type UserOption = { id: string; name: string; role: string };
+type UserOption = { id: string; name: string; roleLabel: string };
 
 export function TasksView({
-  admin,
+  canDelegate,
   users,
   myTasks,
-  allTasks,
+  byMeTasks,
+  teamTasks,
   onCreate,
   onToggle,
+  onReassign,
+  onSetReason,
   onDelete,
 }: {
-  admin: boolean;
+  canDelegate: boolean;
   users: UserOption[];
   myTasks: TaskDTO[];
-  allTasks: TaskDTO[];
+  byMeTasks: TaskDTO[];
+  teamTasks: TaskDTO[];
   onCreate: (d: {
     title: string;
     details?: string;
@@ -36,6 +48,8 @@ export function TasksView({
     dueDate?: string;
   }) => Promise<void>;
   onToggle: (id: string, done: boolean) => Promise<void>;
+  onReassign: (id: string, newAssigneeId: string) => Promise<void>;
+  onSetReason: (id: string, reason: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
   const router = useRouter();
@@ -45,6 +59,13 @@ export function TasksView({
   const [dueDate, setDueDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Per-row editors. Only one task is being reassigned or parked at a time,
+  // so the open row's id plus its draft text is all the state needed.
+  const [reassigning, setReassigning] = useState<string | null>(null);
+  const [parking, setParking] = useState<string | null>(null);
+  const [reasonDraft, setReasonDraft] = useState("");
+  const [rowError, setRowError] = useState<string | null>(null);
 
   const create = () => {
     setError(null);
@@ -68,83 +89,244 @@ export function TasksView({
     });
   };
 
-  const toggle = (t: TaskDTO) =>
+  // The row actions share one error line, because only one row is ever open.
+  const runOnRow = (fn: () => Promise<void>, fallback: string, after?: () => void) => {
+    setRowError(null);
     startTransition(async () => {
-      await onToggle(t.id, t.status !== "done");
-      router.refresh();
+      try {
+        await fn();
+        after?.();
+        router.refresh();
+      } catch (e) {
+        setRowError(e instanceof Error ? e.message : fallback);
+      }
+    });
+  };
+
+  const toggle = (t: TaskDTO) =>
+    runOnRow(() => onToggle(t.id, t.status !== "done"), "Could not update the task");
+
+  const reassign = (t: TaskDTO, userId: string) =>
+    runOnRow(() => onReassign(t.id, userId), "Could not reassign the task", () =>
+      setReassigning(null)
+    );
+
+  const saveReason = (t: TaskDTO) =>
+    runOnRow(() => onSetReason(t.id, reasonDraft), "Could not save the reason", () => {
+      setParking(null);
+      setReasonDraft("");
     });
 
   const remove = (t: TaskDTO) => {
     if (!confirm(`Delete task "${t.title}"?`)) return;
-    startTransition(async () => {
-      await onDelete(t.id);
-      router.refresh();
-    });
+    runOnRow(() => onDelete(t.id), "Could not delete the task");
+  };
+
+  const openPark = (t: TaskDTO) => {
+    setRowError(null);
+    setReassigning(null);
+    setParking(t.id);
+    setReasonDraft(t.statusReason ?? "");
+  };
+
+  const openReassign = (t: TaskDTO) => {
+    setRowError(null);
+    setParking(null);
+    setReassigning(t.id);
   };
 
   const today = formatISODate(new Date());
-  const taskRow = (t: TaskDTO, opts: { showAssignee?: boolean; canDelete?: boolean }) => {
+
+  const taskRow = (t: TaskDTO, opts: { showAssignee?: boolean }) => {
     const done = t.status === "done";
     const overdue = !done && t.dueDate && t.dueDate < today;
     return (
-      <div key={t.id} className="flex items-start gap-3 py-2.5">
-        <button
-          onClick={() => toggle(t)}
-          disabled={isPending}
-          className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
-            done
-              ? "bg-emerald-600 border-emerald-600 text-white"
-              : "bg-white border-slate-300 hover:border-slate-500"
-          }`}
-          aria-label={done ? "Mark as open" : "Mark as done"}
-        >
-          {done && <Icon.Check size={13} stroke={3} />}
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className={`text-[13px] font-semibold ${done ? "line-through text-slate-400" : "text-ink"}`}>
-            {t.title}
-          </div>
-          {t.details && (
-            <div className={`text-[12px] mt-0.5 ${done ? "text-slate-400" : "text-slate-600"}`}>
-              {t.details}
+      <div key={t.id} className="py-2.5">
+        <div className="flex items-start gap-3">
+          <button
+            onClick={() => toggle(t)}
+            disabled={isPending || !t.canManage}
+            className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
+              done
+                ? "bg-emerald-600 border-emerald-600 text-white"
+                : t.canManage
+                  ? "bg-white border-slate-300 hover:border-slate-500"
+                  : "bg-slate-50 border-slate-200 cursor-not-allowed"
+            }`}
+            aria-label={done ? "Mark as open" : "Mark as done"}
+          >
+            {done && <Icon.Check size={13} stroke={3} />}
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className={`text-[13px] font-semibold ${done ? "line-through text-slate-400" : "text-ink"}`}>
+              {t.title}
             </div>
-          )}
-          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-            {opts.showAssignee && <Pill tone="slate">{t.assignedToName}</Pill>}
-            {t.dueDate && (
-              <span className={`text-[11px] font-semibold ${overdue ? "text-brand-red" : "text-slate-500"}`}>
-                {overdue ? "Overdue · " : "Due "}
-                {formatShortDate(new Date(t.dueDate))}
-              </span>
+            {t.details && (
+              <div className={`text-[12px] mt-0.5 ${done ? "text-slate-400" : "text-slate-600"}`}>
+                {t.details}
+              </div>
             )}
-            {done && <Pill tone="success">done</Pill>}
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              {opts.showAssignee && (
+                <>
+                  <Pill tone="slate">{t.assignedToName}</Pill>
+                  {/* The rank, so a delegator can see at a glance which rung
+                      of the chain a task is sitting on. */}
+                  <Pill tone="dark">{t.assigneeRoleLabel}</Pill>
+                </>
+              )}
+              {t.dueDate && (
+                <span className={`text-[11px] font-semibold ${overdue ? "text-brand-red" : "text-slate-500"}`}>
+                  {overdue ? "Overdue · " : "Due "}
+                  {formatShortDate(new Date(t.dueDate))}
+                </span>
+              )}
+              {done && <Pill tone="success">done</Pill>}
+              {!done && t.statusReason && <Pill tone="warning">parked</Pill>}
+              {t.createdByName && !t.isMine && (
+                <span className="text-[11px] text-slate-400">by {t.createdByName}</span>
+              )}
+            </div>
+            {!done && t.statusReason && (
+              <div className="text-[12px] text-amber-800 mt-1">On hold: {t.statusReason}</div>
+            )}
+          </div>
+          <div className="flex items-center gap-0.5 shrink-0">
+            {t.canManage && !done && (
+              <button
+                onClick={() => (parking === t.id ? setParking(null) : openPark(t))}
+                disabled={isPending}
+                className="w-8 h-8 rounded-md hover:bg-amber-50 flex items-center justify-center text-amber-700"
+                aria-label="Park with a reason"
+                title="Say why this is on hold"
+              >
+                <Icon.Flag size={14} />
+              </button>
+            )}
+            {t.canReassign && users.length > 0 && (
+              <button
+                onClick={() => (reassigning === t.id ? setReassigning(null) : openReassign(t))}
+                disabled={isPending}
+                className="w-8 h-8 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-600"
+                aria-label="Reassign"
+                title="Hand this to someone else"
+              >
+                <Icon.Users size={15} />
+              </button>
+            )}
+            {t.canRemove && (
+              <button
+                onClick={() => remove(t)}
+                disabled={isPending}
+                className="w-8 h-8 rounded-md hover:bg-red-50 flex items-center justify-center text-red-600"
+                aria-label="Delete task"
+              >
+                <Icon.Trash size={14} />
+              </button>
+            )}
           </div>
         </div>
-        {opts.canDelete && (
-          <button
-            onClick={() => remove(t)}
-            disabled={isPending}
-            className="w-8 h-8 rounded-md hover:bg-red-50 flex items-center justify-center text-red-600 shrink-0"
-            aria-label="Delete task"
-          >
-            <Icon.Trash size={14} />
-          </button>
+
+        {/* Reason for parking. Blank clears it, which is how a task comes off
+            hold without being completed. */}
+        {parking === t.id && (
+          <div className="mt-2 ml-8 flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[180px]">
+              <Field label="Why is this on hold?">
+                <Input
+                  value={reasonDraft}
+                  onChange={(e) => setReasonDraft(e.target.value)}
+                  placeholder="e.g. waiting for cement delivery"
+                  autoFocus
+                />
+              </Field>
+            </div>
+            <Button onClick={() => saveReason(t)} disabled={isPending} variant="primary" size="sm">
+              {isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button onClick={() => setParking(null)} variant="ghost" size="sm">
+              Cancel
+            </Button>
+          </div>
+        )}
+
+        {/* Reassign. The options are already limited to the roles this user
+            may delegate to; the server checks the chosen one again anyway. */}
+        {reassigning === t.id && (
+          <div className="mt-2 ml-8 flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[180px]">
+              <Field label="Reassign to">
+                <Select defaultValue="" onChange={(e) => e.target.value && reassign(t, e.target.value)}>
+                  <option value="">Pick someone…</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} · {u.roleLabel}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <Button onClick={() => setReassigning(null)} variant="ghost" size="sm">
+              Cancel
+            </Button>
+          </div>
+        )}
+
+        {rowError && (parking === t.id || reassigning === t.id) && (
+          <div className="text-xs text-red-600 mt-1 ml-8">{rowError}</div>
         )}
       </div>
     );
   };
 
-  const openAll = allTasks.filter((t) => t.status !== "done");
-  const doneAll = allTasks.filter((t) => t.status === "done");
+  // A section of tasks: open ones up top, completed folded underneath.
+  const section = (
+    heading: string,
+    note: string,
+    rows: TaskDTO[],
+    empty: React.ReactNode,
+    opts: { showAssignee?: boolean }
+  ) => {
+    const open = rows.filter((t) => t.status !== "done");
+    const closed = rows.filter((t) => t.status === "done");
+    return (
+      <Card>
+        <h3 className="text-[14px] font-bold mb-1">
+          {heading} <span className="text-slate-400 font-normal">({open.length} open)</span>
+        </h3>
+        <div className="text-[11px] text-slate-400 mb-1">{note}</div>
+        {rows.length === 0 ? (
+          empty
+        ) : (
+          <>
+            <div className="divide-y divide-slate-100">
+              {open.map((t) => taskRow(t, opts))}
+            </div>
+            {closed.length > 0 && (
+              <div className="mt-3 pt-2 border-t border-slate-100">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                  Completed
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {closed.map((t) => taskRow(t, opts))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+    );
+  };
 
   return (
     <div className="space-y-4">
-      {admin && (
+      {/* Only the roles that sit above someone get a create form at all. */}
+      {canDelegate && (
         <Card>
           <h3 className="text-[14px] font-bold mb-3">Assign a task</h3>
           {users.length === 0 ? (
             <div className="text-[13px] text-slate-500">
-              No managers or telecallers yet.{" "}
+              Nobody reports to you yet.{" "}
               <a href="/settings/users" className="text-brand-blue underline">
                 Add a user
               </a>{" "}
@@ -160,11 +342,11 @@ export function TasksView({
                     placeholder="e.g. Call back pending leads"
                   />
                 </Field>
-                <Field label="Assign to">
+                <Field label="Assign to" hint="Only people below you in the chain are listed.">
                   <Select value={assignedToId} onChange={(e) => setAssignedToId(e.target.value)}>
                     {users.map((u) => (
                       <option key={u.id} value={u.id}>
-                        {u.name} · {u.role}
+                        {u.name} · {u.roleLabel}
                       </option>
                     ))}
                   </Select>
@@ -191,46 +373,38 @@ export function TasksView({
         </Card>
       )}
 
-      {/* Everyone sees the tasks assigned to them. */}
-      {(!admin || myTasks.length > 0) && (
-        <Card>
-          <h3 className="text-[14px] font-bold mb-1">My tasks</h3>
-          {myTasks.length === 0 ? (
-            <div className="text-[13px] text-slate-500 py-2">Nothing assigned to you right now. 🎉</div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {myTasks.map((t) => taskRow(t, { canDelete: admin }))}
-            </div>
-          )}
-        </Card>
+      {/* Everyone gets this one — it is the whole screen for a telecaller. */}
+      {section(
+        "Assigned to me",
+        "Work you are expected to finish",
+        myTasks,
+        <div className="text-[13px] text-slate-500 py-2">Nothing assigned to you right now. 🎉</div>,
+        {}
       )}
 
-      {admin && (
-        <Card>
-          <h3 className="text-[14px] font-bold mb-1">
-            All assigned tasks{" "}
-            <span className="text-slate-400 font-normal">({openAll.length} open)</span>
-          </h3>
-          {allTasks.length === 0 ? (
-            <EmptyState title="No tasks yet" sub="Assign the first task above." />
-          ) : (
-            <>
-              <div className="divide-y divide-slate-100">
-                {openAll.map((t) => taskRow(t, { showAssignee: true, canDelete: true }))}
-              </div>
-              {doneAll.length > 0 && (
-                <div className="mt-3 pt-2 border-t border-slate-100">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Completed
-                  </div>
-                  <div className="divide-y divide-slate-100">
-                    {doneAll.map((t) => taskRow(t, { showAssignee: true, canDelete: true }))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </Card>
+      {/* Shown to everyone who has ever handed work out, delegator or not —
+          a task you created and then had your role changed still belongs on
+          your screen. */}
+      {byMeTasks.length > 0 &&
+        section(
+          "Assigned by me",
+          "Work you handed to someone else",
+          byMeTasks,
+          <EmptyState title="Nothing assigned yet" sub="Assign the first task above." />,
+          { showAssignee: true }
+        )}
+
+      {canDelegate &&
+        section(
+          "My team's tasks",
+          "Everything sitting with the people below you, whoever assigned it",
+          teamTasks,
+          <EmptyState title="No tasks for your team yet" sub="Assign the first task above." />,
+          { showAssignee: true }
+        )}
+
+      {rowError && !parking && !reassigning && (
+        <div className="text-xs text-red-600">{rowError}</div>
       )}
     </div>
   );

@@ -117,6 +117,33 @@ export const primaryNav: NavItem[] = [
     matches: ["/quotations"],
   },
   {
+    id: "duty",
+    label: "On duty",
+    href: "/duty",
+    icon: "Clock",
+    matches: ["/duty"],
+    area: "leads",
+  },
+  {
+    id: "payments",
+    label: "Payment approvals",
+    href: "/payments",
+    icon: "Receipt",
+    matches: ["/payments"],
+    // Approving a payment is a manager/owner act, not a grantable area — the
+    // page enforces isFullAccess, and adminOrManager keeps the nav honest
+    // about that rather than showing a link that redirects.
+    adminOrManager: true,
+  },
+  {
+    id: "fulfilment",
+    label: "Production queue",
+    href: "/fulfilment",
+    icon: "Truck",
+    matches: ["/fulfilment"],
+    area: "production",
+  },
+  {
     id: "quote-review",
     label: "Quote review",
     href: "/quotations/review",

@@ -3,10 +3,10 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Card, Field, Input, Select, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { DEFAULT_AREAS_BY_ROLE } from "@/lib/access";
+import { ROLES, isFullAccess, roleLabel, type Role } from "@/lib/roles";
 
 type Area = { key: string; label: string };
-type Role = "admin" | "manager" | "telecaller" | "staff";
-const ROLES: Role[] = ["admin", "manager", "telecaller", "staff"];
 type User = {
   id: string;
   name: string;
@@ -23,6 +23,14 @@ type UpdateData = {
   active: boolean;
   password?: string;
 };
+
+// Two role strings share the label "Owner" (admin is the legacy spelling of
+// owner), so the raw key is appended when it differs from the label. That
+// keeps all six of ROLES selectable without two identical options.
+function roleOptionLabel(r: Role): string {
+  const label = roleLabel(r);
+  return label.toLowerCase() === r ? label : `${label} (${r})`;
+}
 
 export function UsersManager({
   areas,
@@ -47,12 +55,32 @@ export function UsersManager({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const defaultsFor = (r: Role) => DEFAULT_AREAS_BY_ROLE[r] ?? [];
+
+  /**
+   * Picking a role suggests that role's default areas — it never imposes
+   * them.
+   *
+   * For a NEW user the defaults are applied straight away: there is nothing
+   * to lose, and the owner watches the checkboxes fill in, so the change is
+   * visible before they save. For an EXISTING user nothing is touched —
+   * their areas were set by hand at some point and silently replacing them
+   * on a role change would be a quiet data loss. Instead the defaults are
+   * offered as a button below, which the owner can press and then edit.
+   */
+  const changeRole = (next: Role) => {
+    setRole(next);
+    if (editing === "new") setPerms(new Set(defaultsFor(next)));
+  };
+
+  const applyDefaults = () => setPerms(new Set(defaultsFor(role)));
+
   const startNew = () => {
     setEditing("new");
     setName("");
     setPassword("");
     setRole("manager");
-    setPerms(new Set());
+    setPerms(new Set(defaultsFor("manager")));
     setActive(true);
     setError(null);
   };
@@ -60,7 +88,7 @@ export function UsersManager({
     setEditing(u.id);
     setName(u.name);
     setPassword("");
-    setRole((ROLES.includes(u.role as Role) ? u.role : "manager") as Role);
+    setRole((ROLES.includes(u.role as Role) ? u.role : "staff") as Role);
     setPerms(new Set(u.permissions));
     setActive(u.active);
     setError(null);
@@ -83,15 +111,20 @@ export function UsersManager({
     if (!name.trim()) return setError("Name is required");
     if (editing === "new" && password.length < 4)
       return setError("Set a password (min 4 characters)");
+    // A full-access role never stores per-area grants (isAdmin short-circuits
+    // can()), so don't carry the previous role's areas across with it — e.g.
+    // promoting a telecaller to manager would otherwise file their old leads
+    // grant under a manager who needs none of it.
+    const permissions = isFullAccess(role) ? [] : Array.from(perms);
     startTransition(async () => {
       try {
         if (editing === "new") {
-          await onCreate({ name: name.trim(), password, role, permissions: Array.from(perms) });
+          await onCreate({ name: name.trim(), password, role, permissions });
         } else if (editing) {
           await onUpdate(editing, {
             name: name.trim(),
             role,
-            permissions: Array.from(perms),
+            permissions,
             active,
             password: password.length >= 4 ? password : undefined,
           });
@@ -116,6 +149,13 @@ export function UsersManager({
     });
   };
 
+  // What the current role's defaults would add or remove, so the owner can
+  // see what the button does before pressing it.
+  const suggested = defaultsFor(role);
+  const defaultsDiffer =
+    suggested.length > 0 &&
+    (suggested.length !== perms.size || suggested.some((k) => !perms.has(k)));
+
   const form = (
     <Card className="border-2 border-brand-red/30">
       <div className="grid sm:grid-cols-2 gap-3">
@@ -133,33 +173,61 @@ export function UsersManager({
             placeholder={editing === "new" ? "min 4 characters" : "unchanged"}
           />
         </Field>
-        <Field label="Role">
-          <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="admin">Admin (full access)</option>
-            <option value="manager">Manager</option>
-            <option value="telecaller">Telecaller</option>
-            <option value="staff">Staff</option>
+        <Field
+          label="Role"
+          hint="The role also decides who can assign them tasks: work only flows downward."
+        >
+          {/* All six roles from lib/roles.ts — supervisor included, which
+              this dropdown used to be unable to express. */}
+          <Select value={role} onChange={(e) => changeRole(e.target.value as Role)}>
+            {ROLES.map((r) => (
+              <option key={r} value={r}>
+                {roleOptionLabel(r)}
+                {isFullAccess(r) ? " · full access" : ""}
+              </option>
+            ))}
           </Select>
         </Field>
         {editing !== "new" && (
           <Field label="Status">
             <Select value={active ? "1" : "0"} onChange={(e) => setActive(e.target.value === "1")}>
               <option value="1">Active</option>
-              <option value="0">Disabled (can't log in)</option>
+              <option value="0">Disabled (can&apos;t log in)</option>
             </Select>
           </Field>
         )}
       </div>
 
-      {role === "admin" ? (
+      {isFullAccess(role) ? (
         <div className="mt-3 text-[12px] text-slate-500">
-          Admins can see and do everything, including revenue and user management.
+          {roleLabel(role)}s can see and do everything, including revenue and user management.
+          Per-area grants are not stored for them.
         </div>
       ) : (
         <div className="mt-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
             Areas this user can access
           </div>
+
+          {/* The defaults are a starting point, never enforced — and for an
+              existing user they are applied only when the owner asks, so a
+              role change can't quietly wipe areas granted by hand. */}
+          {defaultsDiffer && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-brand-blueLight/60 border border-brand-blue/20 px-2.5 py-2">
+              <span className="text-[12px] text-ink">
+                Usual areas for a {roleLabel(role)}:{" "}
+                <strong>
+                  {suggested
+                    .map((k) => areas.find((a) => a.key === k)?.label ?? k)
+                    .join(", ")}
+                </strong>
+              </span>
+              <Button onClick={applyDefaults} variant="secondary" size="sm">
+                Use these
+              </Button>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
             {areas.map((a) => {
               const on = perms.has(a.key);
@@ -219,7 +287,7 @@ export function UsersManager({
 
       <div className="space-y-2">
         {users.map((u) => {
-          const isAdminRole = u.role === "admin" || u.role === "owner";
+          const unrestricted = isFullAccess(u.role);
           return (
             <Card key={u.id} className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-ink text-white flex items-center justify-center text-[13px] font-bold">
@@ -228,11 +296,11 @@ export function UsersManager({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-[14px] font-bold text-ink truncate">{u.name}</span>
-                  <Pill tone={isAdminRole ? "dark" : "slate"}>{u.role}</Pill>
+                  <Pill tone={unrestricted ? "dark" : "slate"}>{roleLabel(u.role)}</Pill>
                   {!u.active && <Pill tone="red">disabled</Pill>}
                 </div>
                 <div className="text-[11px] text-slate-500 mt-0.5">
-                  {isAdminRole
+                  {unrestricted
                     ? "Full access"
                     : u.permissions.length === 0
                       ? "No areas yet"

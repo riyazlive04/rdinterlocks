@@ -234,25 +234,82 @@ export async function nextQuotationNumber(tx: Prisma.TransactionClient, financia
 }
 
 /**
- * Accept a quotation and turn it into a real Order, copying the FROZEN line
- * items verbatim (never re-reading BrickPrice). One transaction, optimistic
- * `updateMany` guard — same shape as convertLeadCore's claim, for the same
- * reason: if a concurrent request accepted this quotation a moment ago, the
- * claim matches zero rows and the whole transaction (including the Order
- * this call may have already speculatively created) rolls back.
+ * Move a quotation's lead into the won stage and stop its nurture sequence,
+ * because the customer has said yes.
+ *
+ * Lifted out of the conversion body so the pipeline can be updated the moment
+ * the customer accepts (acceptQuotation) rather than waiting for a manager to
+ * approve the payment — otherwise a customer who has already agreed keeps
+ * receiving nurture messages while the money is being checked.
+ *
+ * IDEMPOTENT on purpose: it runs at acceptance and again when the order is
+ * created from the approved payment. The second call sees the lead already
+ * sitting in the won stage and writes nothing, so there is no duplicate
+ * stage-history row.
  */
-export async function convertQuotationToOrder(id: string): Promise<string> {
-  const quotation = await prisma.quotation.findUnique({ where: { id }, include: { items: true } });
+export async function syncLeadWonForQuotation(tx: Prisma.TransactionClient, leadId: string): Promise<void> {
+  const lead = await tx.lead.findUnique({ where: { id: leadId } });
+  const wonStage = await tx.leadStage.findFirst({ where: { isWon: true, isActive: true } });
+  if (lead && wonStage && lead.stageId !== wonStage.id) {
+    await tx.lead.update({
+      where: { id: leadId },
+      data: { stageId: wonStage.id, stageEnteredAt: new Date(), quotationStage: "won" },
+    });
+    await tx.leadStageHistory.create({
+      data: {
+        leadId,
+        fromStageId: lead.stageId,
+        toStageId: wonStage.id,
+        note: "Quotation accepted",
+      },
+    });
+  }
+  // Unconditional but self-filtering: only `active` enrollments are touched,
+  // so a repeat call is a no-op.
+  await tx.waEnrollment.updateMany({
+    where: { leadId, status: "active" },
+    data: { status: "stopped", stopReason: "stage" },
+  });
+}
+
+/**
+ * Turn a quotation into a real Order, copying the FROZEN line items verbatim
+ * (never re-reading BrickPrice) — the body of convertQuotationToOrder, taking
+ * the caller's transaction client.
+ *
+ * Split out because order creation is no longer triggered by acceptance: a
+ * manager approving the customer's payment is what creates the order, and that
+ * approval must mark the payment and create the order in ONE transaction (see
+ * lib/quote-payment.ts). This function cannot open its own transaction in that
+ * case — Prisma has no nested transactions — so the transaction client is a
+ * parameter and convertQuotationToOrder below is the thin public wrapper that
+ * still opens one for every existing caller.
+ *
+ * Every read also moved inside the transaction, which is strictly safer than
+ * before: the guards below and the claim at the end now see the same snapshot.
+ */
+export async function convertQuotationToOrderTx(tx: Prisma.TransactionClient, id: string): Promise<string> {
+  const quotation = await tx.quotation.findUnique({ where: { id }, include: { items: true } });
   if (!quotation) throw new Error("Quotation not found.");
-  if (quotation.status === "accepted") throw new Error("This quotation has already been accepted.");
-  // Only a quotation the customer actually has can be accepted. Checked as an
-  // allow-list rather than by excluding `draft`: the review states
+  // One order per quotation, and `orderId` — not `status` — is what says
+  // whether one exists. `accepted` used to imply an order, so testing the
+  // status was enough; now `accepted` means "the customer agreed, the payment
+  // is waiting for a manager", which is precisely the state this function is
+  // normally called IN. Reading the link itself keeps the guard meaningful
+  // (and Quotation.orderId is @unique, so the database enforces it too).
+  if (quotation.orderId) throw new Error("This quotation has already been accepted — an order exists for it.");
+  // Only a quotation the customer actually has can be converted. Checked as
+  // an allow-list rather than by excluding `draft`: the review states
   // (in_review, changes_requested, approved) and a swept `expired` row would
   // all otherwise fall straight through to conversion — `expired` most
   // dangerously, since isQuotationExpired() below returns false once the
   // status is no longer `sent`, so the stale-price guard stops firing exactly
   // when the row has been marked stale.
-  if (quotation.status !== "sent") {
+  //
+  // `accepted` joins `sent` on the allow-list because of the payment gate:
+  // acceptQuotation marks the quotation accepted and creates nothing, and the
+  // order is created later, from here, when the payment is approved.
+  if (quotation.status !== "sent" && quotation.status !== "accepted") {
     const reason: Record<string, string> = {
       draft: "Mark this quotation as sent before accepting it.",
       in_review: "This quotation is still with the reviewer.",
@@ -268,6 +325,11 @@ export async function convertQuotationToOrder(id: string): Promise<string> {
   // validUntil. Converting it afterwards would commit the factory to a stale
   // rate, so the office has to revise it (which re-reads today's prices) and
   // send the new revision instead.
+  //
+  // Only bites on a `sent` quotation (isQuotationExpired says so), which is
+  // the right boundary: expiry is about handing the customer a price that has
+  // gone stale, and once they have accepted inside the validity window the
+  // date passing while a manager checks the money must not void the sale.
   if (isQuotationExpired(quotation)) {
     throw new Error(
       `This quotation expired on ${quotation.validUntil!.toLocaleDateString("en-IN")}. ` +
@@ -275,68 +337,61 @@ export async function convertQuotationToOrder(id: string): Promise<string> {
     );
   }
 
-  return prisma.$transaction(async (tx) => {
-    let targetClientId = quotation.clientId;
-    if (!targetClientId) {
-      const created = await tx.client.create({
-        data: {
-          name: quotation.customerName || "Unnamed",
-          location: quotation.place || null,
-          phone: quotation.customerPhone || null,
-          notes: `From quotation ${quotation.number}`,
-        },
-      });
-      targetClientId = created.id;
-    }
-
-    const order = await tx.order.create({
+  let targetClientId = quotation.clientId;
+  if (!targetClientId) {
+    const created = await tx.client.create({
       data: {
-        clientId: targetClientId,
-        date: new Date(),
+        name: quotation.customerName || "Unnamed",
+        location: quotation.place || null,
+        phone: quotation.customerPhone || null,
         notes: `From quotation ${quotation.number}`,
-        items: {
-          create: quotation.items.map((it) => ({
-            brickSizeId: it.brickSizeId,
-            constructionTypeId: it.constructionTypeId,
-            quantity: it.quantity,
-            pricePerBrick: it.unitPrice,
-            total: it.total,
-          })),
-        },
       },
     });
+    targetClientId = created.id;
+  }
 
-    const claimed = await tx.quotation.updateMany({
-      where: { id, status: { not: "accepted" } },
-      data: { status: "accepted", orderId: order.id },
-    });
-    if (claimed.count === 0) {
-      throw new Error("This quotation was already accepted by someone else a moment ago.");
-    }
-
-    if (quotation.leadId) {
-      const lead = await tx.lead.findUnique({ where: { id: quotation.leadId } });
-      const wonStage = await tx.leadStage.findFirst({ where: { isWon: true, isActive: true } });
-      if (lead && wonStage) {
-        await tx.lead.update({
-          where: { id: quotation.leadId },
-          data: { stageId: wonStage.id, stageEnteredAt: new Date(), quotationStage: "won" },
-        });
-        await tx.leadStageHistory.create({
-          data: {
-            leadId: quotation.leadId,
-            fromStageId: lead.stageId,
-            toStageId: wonStage.id,
-            note: "Quotation accepted",
-          },
-        });
-      }
-      await tx.waEnrollment.updateMany({
-        where: { leadId: quotation.leadId, status: "active" },
-        data: { status: "stopped", stopReason: "stage" },
-      });
-    }
-
-    return targetClientId;
+  const order = await tx.order.create({
+    data: {
+      clientId: targetClientId,
+      date: new Date(),
+      notes: `From quotation ${quotation.number}`,
+      items: {
+        create: quotation.items.map((it) => ({
+          brickSizeId: it.brickSizeId,
+          constructionTypeId: it.constructionTypeId,
+          quantity: it.quantity,
+          pricePerBrick: it.unitPrice,
+          total: it.total,
+        })),
+      },
+    },
   });
+
+  // Optimistic claim — same shape as convertLeadCore's, for the same reason:
+  // if a concurrent request converted this quotation a moment ago, the claim
+  // matches zero rows and the whole transaction (including the Order just
+  // created above) rolls back. Predicated on `orderId: null` rather than the
+  // status, for the reason given at the top of this function.
+  const claimed = await tx.quotation.updateMany({
+    where: { id, orderId: null },
+    data: { status: "accepted", orderId: order.id },
+  });
+  if (claimed.count === 0) {
+    throw new Error("This quotation was already accepted by someone else a moment ago.");
+  }
+
+  if (quotation.leadId) await syncLeadWonForQuotation(tx, quotation.leadId);
+
+  return targetClientId;
+}
+
+/**
+ * Accept a quotation and turn it into a real Order, in its own transaction.
+ *
+ * Kept with exactly its original signature and behaviour for the callers that
+ * already use it (scripts/e2e/run-db.ts); the payment-approval path calls
+ * convertQuotationToOrderTx directly instead, inside its own transaction.
+ */
+export async function convertQuotationToOrder(id: string): Promise<string> {
+  return prisma.$transaction((tx) => convertQuotationToOrderTx(tx, id));
 }

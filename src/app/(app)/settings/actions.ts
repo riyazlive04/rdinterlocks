@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { getSession, requireAdmin } from "@/lib/auth";
 import { triggerWaSequencesForStage } from "@/lib/lead-stage";
 import { isValidVpa } from "@/lib/upi-vpa";
+import { ROLES, isFullAccess, isOwner } from "@/lib/roles";
 
 // ─── Brick sizes ───────────────────────────────────────────────────────
 
@@ -653,7 +654,11 @@ export async function changePassword(data: z.infer<typeof passwordSchema>) {
 
 // ─── Users & access (admin-managed) ───────────────────────────────────
 
-const roleEnum = z.enum(["admin", "manager", "telecaller", "staff"]);
+// Derived from ROLES rather than re-listed, so adding a role to the
+// hierarchy can never leave this behind. It already had: the dropdown
+// offered `supervisor` and `owner` while this enum still named four roles,
+// so saving either threw a validation error from a form that looked valid.
+const roleEnum = z.enum(ROLES);
 
 const userCreateSchema = z.object({
   name: z.string().min(1),
@@ -671,7 +676,7 @@ export async function createUser(input: z.infer<typeof userCreateSchema>) {
       pinHash: await bcrypt.hash(p.password, 10),
       role: p.role,
       // admins implicitly have everything, so we don't store per-area grants
-      permissions: p.role === "admin" ? [] : p.permissions,
+      permissions: isFullAccess(p.role) ? [] : p.permissions,
       active: true,
     },
   });
@@ -693,15 +698,38 @@ async function adminCount(activeOnly = true) {
 }
 
 export async function updateUser(id: string, input: z.infer<typeof userUpdateSchema>) {
-  await requireAdmin();
+  const session = await requireAdmin();
   const p = userUpdateSchema.parse(input);
   const target = await prisma.user.findUnique({ where: { id } });
+
+  // Nobody edits their own rank or switches themselves off.
+  //
+  // Settings is open to managers as well as owners, and manager now carries
+  // the same access as owner — so without this, a manager could simply
+  // promote themselves and step outside the chain of command the owner set
+  // up, which is the one thing the hierarchy exists to fix. It also stops the
+  // ordinary accident of an owner deactivating the account they are signed in
+  // with. Editing OTHER people is untouched; this is only about yourself.
+  if (target && target.id === session.userId) {
+    if (p.role !== target.role) {
+      throw new Error("You can't change your own role — ask another owner to do it.");
+    }
+    if (!p.active) {
+      throw new Error("You can't deactivate your own account.");
+    }
+  }
   if (!target) throw new Error("User not found");
-  const targetIsActiveAdmin =
-    (target.role === "admin" || target.role === "owner") && target.active;
-  // Don't let the last admin be demoted or deactivated.
-  if (targetIsActiveAdmin && (p.role !== "admin" || !p.active)) {
-    if ((await adminCount(true)) <= 1) throw new Error("This is the only admin - keep at least one.");
+  const targetIsActiveAdmin = isOwner(target.role) && target.active;
+  // Don't let the last owner be demoted or deactivated.
+  //
+  // Compared with isOwner() rather than the literal "admin": adminCount()
+  // counts admin AND owner, so checking `p.role !== "admin"` treated
+  // admin -> owner as a demotion and blocked a rename that changes nothing,
+  // while leaving owner -> manager unguarded in the other direction. Manager
+  // is deliberately NOT counted here — it has the same access, but an org
+  // with no owner left has nobody above the managers.
+  if (targetIsActiveAdmin && (!isOwner(p.role) || !p.active)) {
+    if ((await adminCount(true)) <= 1) throw new Error("This is the only owner - keep at least one.");
   }
   const data: {
     name: string;
@@ -712,7 +740,7 @@ export async function updateUser(id: string, input: z.infer<typeof userUpdateSch
   } = {
     name: p.name.trim(),
     role: p.role,
-    permissions: p.role === "admin" ? [] : p.permissions,
+    permissions: isFullAccess(p.role) ? [] : p.permissions,
     active: p.active,
   };
   if (p.password && p.password.length >= 4) data.pinHash = await bcrypt.hash(p.password, 10);
@@ -721,12 +749,28 @@ export async function updateUser(id: string, input: z.infer<typeof userUpdateSch
 }
 
 export async function deleteUser(id: string) {
-  await requireAdmin();
+  const session = await requireAdmin();
   const target = await prisma.user.findUnique({ where: { id } });
   if (!target) return;
-  if (target.role === "admin" || target.role === "owner") {
-    if ((await adminCount(false)) <= 1) throw new Error("Can't delete the only admin.");
+
+  // Same self-protection as updateUser: you cannot delete yourself. Settings
+  // is open to managers as well as owners, so without this a manager could
+  // remove their own account mid-session and leave an orphaned session cookie
+  // pointing at a user row that no longer exists.
+  if (target.id === session.userId) {
+    throw new Error("You can't delete your own account — ask another owner to do it.");
   }
+
+  if (isOwner(target.role)) {
+    if ((await adminCount(false)) <= 1) throw new Error("Can't delete the only owner.");
+  }
+
+  // Deleting a user is destructive beyond the row itself: Task.assignedTo and
+  // DutySession cascade, so their assigned work and shift history go with
+  // them, while lead ownership, activity authorship and payment approvals are
+  // SetNull and merely lose the name. Deactivating (active: false) keeps all
+  // of it and is what the UI should steer people towards; this stays for
+  // genuine mistakes like a duplicate account created minutes ago.
   await prisma.user.delete({ where: { id } });
   revalidatePath("/settings/users");
 }
