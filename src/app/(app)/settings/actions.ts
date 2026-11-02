@@ -690,10 +690,39 @@ function assertMayAdministerUser(actorRole: string, subjectRole: string) {
   }
 }
 
+/**
+ * The name IS the login, so it has to be unique.
+ *
+ * verifyLogin() matches a typed name case-insensitively against every active
+ * user and accepts the first whose password also matches. With two people
+ * called "Raj" that resolves by table order: at best each signs into their
+ * own account by luck, at worst one lands in the other's. Nothing in the UI
+ * would show anything wrong — they would simply see someone else's leads.
+ *
+ * Enforced here rather than as a database constraint because the check has
+ * to be case-insensitive ("Raj" and "raj" are one login to verifyLogin), and
+ * a plain @unique would still admit both.
+ */
+async function assertNameAvailable(name: string, exceptUserId?: string) {
+  const wanted = name.trim().toLowerCase();
+  if (!wanted) throw new Error("A login name is required.");
+
+  const clash = (await prisma.user.findMany({ select: { id: true, name: true, active: true } })).find(
+    (u) => u.id !== exceptUserId && u.name.trim().toLowerCase() === wanted
+  );
+  if (clash) {
+    throw new Error(
+      `There is already a login called "${clash.name}"${clash.active ? "" : " (deactivated)"}. ` +
+        `Login names must be different — try adding a surname or initial.`
+    );
+  }
+}
+
 export async function createUser(input: z.infer<typeof userCreateSchema>) {
   const session = await requireAdmin();
   const p = userCreateSchema.parse(input);
   assertMayConferRole(session.role, p.role);
+  await assertNameAvailable(p.name);
   await prisma.user.create({
     data: {
       name: p.name.trim(),
@@ -747,6 +776,7 @@ export async function updateUser(id: string, input: z.infer<typeof userUpdateSch
   // rank, and may not edit someone who already holds it.
   if (target) assertMayAdministerUser(session.role, target.role);
   assertMayConferRole(session.role, p.role);
+  await assertNameAvailable(p.name, id);
   if (!target) throw new Error("User not found");
   const targetIsActiveAdmin = isOwner(target.role) && target.active;
   // Don't let the last owner be demoted or deactivated.
