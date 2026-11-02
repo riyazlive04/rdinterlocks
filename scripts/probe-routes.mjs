@@ -68,6 +68,10 @@ const routes = [
   "/settings/tippers",
   // Lead intake, the quotation review gate and the send list.
   "/leads/intake",
+  "/duty",
+  "/payments",
+  "/fulfilment",
+  "/tasks",
   "/leads/board",
   "/quotations/review",
   "/quotations/send",

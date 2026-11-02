@@ -148,11 +148,19 @@ export async function requireAdmin(): Promise<Session> {
   return s;
 }
 
-// Owner/admin OR manager. Used by the archive console, which the owner and the
-// manager both run — unlike Settings, which stays admin-only.
+/**
+ * Owner/admin OR manager — the archive console, which both run.
+ *
+ * Now exactly equivalent to requireAdmin(), because isAdmin() covers manager
+ * since the two roles were given the same access. Kept rather than collapsed
+ * for two reasons: its five call sites say what they mean at a glance, and
+ * if the owner/manager split is ever reintroduced this is the seam where it
+ * belongs. The redundant `role !== "manager"` arm is gone — it could never
+ * fire, which made the condition read as though it still did something.
+ */
 export async function requireAdminOrManager(): Promise<Session> {
   const s = await requireSession();
-  if (!isAdmin(s.role) && s.role !== "manager") redirect("/");
+  if (!isAdmin(s.role)) redirect("/");
   return s;
 }
 

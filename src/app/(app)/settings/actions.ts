@@ -667,9 +667,33 @@ const userCreateSchema = z.object({
   permissions: z.array(z.string()).default([]),
 });
 
+/**
+ * Only an owner may mint or confer owner rank.
+ *
+ * Manager deliberately carries the same ACCESS as owner — that was the
+ * decision, and nothing operational is withheld from them. But access and
+ * rank are different things: the role field is the chain of command itself,
+ * so a manager who could set it could promote themselves out of the
+ * hierarchy, or demote the owner out of it. This is the one asymmetry, and
+ * it costs managers nothing they could otherwise do.
+ */
+function assertMayConferRole(actorRole: string, targetRole: string) {
+  if (isOwner(targetRole) && !isOwner(actorRole)) {
+    throw new Error("Only an owner can grant owner rank.");
+  }
+}
+
+/** Likewise, only an owner may edit or remove an existing owner. */
+function assertMayAdministerUser(actorRole: string, subjectRole: string) {
+  if (isOwner(subjectRole) && !isOwner(actorRole)) {
+    throw new Error("Only an owner can change another owner's account.");
+  }
+}
+
 export async function createUser(input: z.infer<typeof userCreateSchema>) {
-  await requireAdmin();
+  const session = await requireAdmin();
   const p = userCreateSchema.parse(input);
+  assertMayConferRole(session.role, p.role);
   await prisma.user.create({
     data: {
       name: p.name.trim(),
@@ -718,6 +742,11 @@ export async function updateUser(id: string, input: z.infer<typeof userUpdateSch
       throw new Error("You can't deactivate your own account.");
     }
   }
+
+  // Rank is owner-only in both directions: a manager may not hand out owner
+  // rank, and may not edit someone who already holds it.
+  if (target) assertMayAdministerUser(session.role, target.role);
+  assertMayConferRole(session.role, p.role);
   if (!target) throw new Error("User not found");
   const targetIsActiveAdmin = isOwner(target.role) && target.active;
   // Don't let the last owner be demoted or deactivated.
@@ -759,6 +788,27 @@ export async function deleteUser(id: string) {
   // pointing at a user row that no longer exists.
   if (target.id === session.userId) {
     throw new Error("You can't delete your own account — ask another owner to do it.");
+  }
+
+  assertMayAdministerUser(session.role, target.role);
+
+  // Deleting a user with history is refused outright, because the cascade is
+  // worse than it looks: Task.assignedTo and DutySession cascade, so their
+  // assigned work and shift record go with them. Deactivating keeps all of
+  // it and still blocks sign-in, which is what "this person has left" nearly
+  // always means. Delete stays available for a genuine mistake — a duplicate
+  // account created minutes ago, which by definition has no history.
+  const [taskCount, shiftCount, leadCount] = await Promise.all([
+    prisma.task.count({ where: { assignedToId: id } }),
+    prisma.dutySession.count({ where: { userId: id } }),
+    prisma.lead.count({ where: { ownerUserId: id } }),
+  ]);
+  if (taskCount + shiftCount + leadCount > 0) {
+    throw new Error(
+      `${target.name} has history in the system (${taskCount} task(s), ${shiftCount} shift(s), ` +
+        `${leadCount} lead(s)). Deleting would take their tasks and shift record with them — ` +
+        `switch the account to inactive instead, which blocks sign-in and keeps the history.`
+    );
   }
 
   if (isOwner(target.role)) {

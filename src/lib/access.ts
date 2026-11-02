@@ -71,7 +71,12 @@ export const DEFAULT_AREAS_BY_ROLE: Record<string, string[]> = {
   manager: [],
   // Runs production and gets stock out of the godown.
   supervisor: ["production", "day", "deliveries", "loading", "tipper", "mason", "sales"],
-  // Works the phone: leads, the quotations they raise, and sending them.
-  telecaller: ["leads", "quotations", "quoteSend", "whatsapp"],
+  // Works the phone: leads, the quotations they raise, reviewing them, and
+  // sending them. `quoteReview` belongs here because the review gate was
+  // built for exactly this person — the brief was that the quotation is
+  // checked by "the telecaller or the person who spoke to the client" before
+  // it goes out. Without it the queue exists and nobody who should staff it
+  // can open it.
+  telecaller: ["leads", "quotations", "quoteReview", "quoteSend", "whatsapp"],
   staff: [],
 };

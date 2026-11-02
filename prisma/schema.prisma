@@ -116,7 +116,11 @@ model Task {
   createdById  String?
   createdBy    User?     @relation("TaskCreator", fields: [createdById], references: [id])
   dueDate      DateTime?
-  status       String    @default("open") // open | done
+  // open | done. The LIVE database still defaults this column to "wip" — a
+  // value predating this schema — so rows created outside the app can carry
+  // it. Everything here treats "not done" as open, which is why those rows
+  // render correctly, but do not assume the set is exactly {open, done}.
+  status       String    @default("open")
   createdAt    DateTime  @default(now())
   completedAt  DateTime?
   // Why a task was put in its current status — set when it is parked or
