@@ -58,7 +58,7 @@ All figures below are from a real run against a throwaway Postgres on
 | `run-nav.ts` | Navigation grouping (phase 6) | **50/50** |
 | `run-offline.ts` | Lead normalisation, webhook signing, pure logic | **128/128** |
 | `run-rbac.ts` | RBAC, duty, payment gate, security fixes | **50/50** |
-| `run-actions.ts` | Stage transitions + task delegation decisions | **135/135** |
+| `run-actions.ts` | Stage transitions, task delegation, password rule | **154/154** |
 | `run-collections.ts` | Outstanding balance and ageing (phase 7) | **73/73** |
 | `run-allocation.ts` | Godown stock allocation (phase 8) | **51/51** |
 | `run-db.ts` | Quotation pricing/numbering, the real order-to-cash spine, WhatsApp gates, Meta ingestion | **121/121** |
@@ -66,7 +66,7 @@ All figures below are from a real run against a throwaway Postgres on
 | `probe-routes.mjs` | All 61 routes, authenticated as owner | all 200 |
 | `npm run build` | Production build | clean |
 
-**626 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
+**645 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
 all pre-existing unused imports.
 
 ### Notable cases
@@ -81,6 +81,7 @@ all pre-existing unused imports.
 | `STAGE-02` | The full 4×4 transition matrix for supervisor and owner. A supervisor has exactly 7 legal moves; an owner has all 16. |
 | `TASK-05` | The assignee may complete a task but **not** delete it. Same actor, same task, opposite answers — asserted side by side. |
 | `TC-DBQ-06` | Now drives the real spine: sent → payment recorded → manager approves → order. |
+| `PW-01` | The password minimum follows `isFullAccess` for every role, and the owner/manager refusal explains itself rather than reading as arbitrary. |
 
 ### Fixed on this branch
 
