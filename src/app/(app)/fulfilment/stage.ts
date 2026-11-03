@@ -57,6 +57,66 @@ export function nextStage(stage: FulfilmentStage): FulfilmentStage | null {
   return FULFILMENT_STAGES[stageIndex(stage) + 1] ?? null;
 }
 
+/** What the order looks like to the transition rule. */
+export type StageSubject = {
+  /** Order.status — open | partial | complete | cancelled. */
+  status: string;
+  /** Null when no manager has approved the payment behind it. */
+  approvedAt: Date | null;
+  from: FulfilmentStage;
+};
+
+export type StageDecision =
+  | { allowed: true; noop: boolean }
+  | { allowed: false; reason: string };
+
+/**
+ * May this user move this order to this stage?
+ *
+ * Pulled out of the server action so the rule can be tested directly. The
+ * action still owns authentication and the write; everything that decides
+ * yes or no is here, which is the part worth pinning — the failure it
+ * prevents is an order marked `dispatched` that was never produced, which
+ * reads to the office as "sent to the customer", empties it out of the queue,
+ * and is only discovered when the customer rings to ask where their bricks
+ * are.
+ *
+ * A supervisor may only step FORWARD BY ONE. Owner/manager (`fullAccess`) may
+ * set any stage in either direction, because correcting a mis-click is their
+ * job and a supervisor who fat-fingers `ready` must have somebody able to put
+ * it back.
+ */
+export function decideStageChange(
+  subject: StageSubject,
+  to: FulfilmentStage,
+  opts: { fullAccess: boolean }
+): StageDecision {
+  // A double-tap, not an error. Reported as a no-op so the caller can skip
+  // the write (and the stageChangedAt reset that would restart the clock).
+  if (subject.from === to) return { allowed: true, noop: true };
+  if (opts.fullAccess) return { allowed: true, noop: false };
+
+  // The queue only lists orders whose payment was approved and which are
+  // still live. Anything else reaching this rule is not something the
+  // supervisor saw on screen, so it is not theirs to move either.
+  if (!subject.approvedAt) {
+    return { allowed: false, reason: "This order's payment has not been approved yet" };
+  }
+  if (subject.status === "cancelled" || subject.status === "complete") {
+    return { allowed: false, reason: `This order is ${subject.status} — its stage is fixed` };
+  }
+
+  const step = stageIndex(to) - stageIndex(subject.from);
+  if (step < 0) return { allowed: false, reason: "Only a manager can move an order back a stage" };
+  if (step > 1) {
+    return {
+      allowed: false,
+      reason: `Move the order one stage at a time — it cannot jump straight to ${to.replace("_", " ")}`,
+    };
+  }
+  return { allowed: true, noop: false };
+}
+
 // How long this order has sat where it is, phrased to sit in front of "ago".
 // The shared relativeTime() switches to a calendar date past a week ("12
 // Oct"), which reads as nonsense in that sentence — and "waiting 11d" is

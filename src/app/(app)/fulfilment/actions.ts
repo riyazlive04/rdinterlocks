@@ -5,7 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireArea } from "@/lib/auth";
 import { isFullAccess } from "@/lib/roles";
-import { FULFILMENT_STAGES, normalizeStage, stageIndex } from "./stage";
+import { FULFILMENT_STAGES, decideStageChange, normalizeStage } from "./stage";
 
 const stageSchema = z.enum(FULFILMENT_STAGES);
 
@@ -23,8 +23,12 @@ const stageSchema = z.enum(FULFILMENT_STAGES);
  * the floor.
  *
  * Owner/manager (`isFullAccess`) may set any stage in either direction,
- * because correcting a mis-click is their job and a supervisor who fat-fingers
- * `ready` must have somebody able to put it back.
+ * because correcting a mis-click is their job and a supervisor who
+ * fat-fingers `ready` must have somebody able to put it back.
+ *
+ * The rule itself lives in `decideStageChange` (./stage) so it can be tested
+ * without a request context — see scripts/e2e/run-actions.ts. This function
+ * keeps what only it can do: authenticate, then write.
  */
 export async function setOrderFulfilmentStage(orderId: string, stage: string) {
   const session = await requireArea("production");
@@ -36,33 +40,17 @@ export async function setOrderFulfilmentStage(orderId: string, stage: string) {
   });
   if (!order) throw new Error("Order not found");
 
-  const from = normalizeStage(order.fulfilmentStage);
-  if (from === to) return; // Nothing to do — a double-tap, not an error.
-
-  const full = isFullAccess(session.role);
-
-  if (!full) {
-    // The queue only lists orders whose payment was approved and which are
-    // still live. Anything else reaching this action is not something the
-    // supervisor saw on screen, so it is not theirs to move either.
-    if (!order.approvedAt) {
-      throw new Error("This order's payment has not been approved yet");
-    }
-    if (order.status === "cancelled" || order.status === "complete") {
-      throw new Error(`This order is ${order.status} — its stage is fixed`);
-    }
-
-    const step = stageIndex(to) - stageIndex(from);
-    if (step < 0) {
-      throw new Error("Only a manager can move an order back a stage");
-    }
-    if (step > 1) {
-      throw new Error(
-        "Move the order one stage at a time — it cannot jump straight to " +
-          `${to.replace("_", " ")}`
-      );
-    }
-  }
+  const decision = decideStageChange(
+    {
+      status: order.status,
+      approvedAt: order.approvedAt,
+      from: normalizeStage(order.fulfilmentStage),
+    },
+    to,
+    { fullAccess: isFullAccess(session.role) }
+  );
+  if (!decision.allowed) throw new Error(decision.reason);
+  if (decision.noop) return;
 
   await prisma.order.update({
     where: { id: orderId },

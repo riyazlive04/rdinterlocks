@@ -17,6 +17,12 @@ start of every session. Update whenever a decision is made.
   jobs are HTTP endpoints plus a thin invoker script under `scripts/`, wired
   to an npm script (`cron:tick`, `cron:sweep`) and driven by Task Scheduler or
   a VPS crontab.
+- **`DIRECT_URL` is the dangerous one.** The e2e suites all guard on
+  `DATABASE_URL`, but `prisma db push` / `migrate` connect through
+  `directUrl`, and `.env` points `DIRECT_URL` at live Supabase. Overriding
+  `DATABASE_URL` alone passed every guard and would have pushed to
+  production. `scripts/guard-local-db.mjs` now requires BOTH to be local and
+  fronts `npm run test:seed`.
 - **`prisma/seed.ts` wipes 34 tables.** It now refuses to run against a
   database holding data unless `--force-reset` is passed. For a live database
   use the targeted seeds instead; each dry-runs by default.
@@ -34,6 +40,15 @@ start of every session. Update whenever a decision is made.
 | The quotation PDF is **frozen at submission** | The PDF route composes from current Settings, so a quotation approved in November re-rendered with January's terms. The reviewed bytes must be the sent bytes. |
 | Locking begins at **`approved`**, not `sent` | Once a PDF is frozen and approved, editing the quotation underneath invalidates the approval. |
 | `Die` / `DieUsage` kept in the schema | They existed in the live database but were never committed here, so the next push would have dropped them. Both turned out to be empty; retained pending a deliberate decision. |
+| Navigation grouping **grants nothing** | Phase 6 is presentation only: `groupedNav` calls `visibleNav` and partitions the result, so access rules keep sole authority. NAV-01 asserts set equality for every role — if grouping dropped an item a role would silently lose a route, and on mobile `/menu` is the only path to it. |
+| A supervisor's menu **keeps Clients & Sales** | The plan's acceptance said "only Make and Move". Wrong: `sales` is in `DEFAULT_AREAS_BY_ROLE.supervisor`, so hiding it would be an access change and would leave a page they can open with no link to it. |
+| Settings keeps its **existing 9 groups** | The plan proposed re-dividing Settings three ways. It is already grouped and only owner/manager see it, so collapsing 9 labelled groups into 3 larger ones loses information for no gain. Not done; deliberate. |
+| **One** definition of what a client owes (`lib/outstanding.ts`) | Three were live and disagreed: the clients list omitted add-ons, returns and advances; the detail page had the fuller formula; the owner dashboard summed only `take: 5` orders, so the headline receivables figure understated the total with nothing on screen to say so. |
+| Receivables age **FIFO over orders** | There are no invoices, so an order is the billable unit, and money settles the oldest bill — which is what the office already does informally. Allocating each payment to the order named on it leaves advances unallocatable. The buckets always sum to the balance; that invariant is what makes the view checkable. |
+| An overpayment reads as a **credit**, not zero | `Math.max(0, balance)` hid a genuine overpayment from the only people who could refund it. |
+| Stock allocation is **derived, never stored** | Phase 8 was planned as a reservation table. Rejected: a stored reservation needs keeping in step with order creation, cancellation, partial dispatch, stage reversal and manual corrections — six writers to one derived number. Recomputing on read holds nothing and cannot drift, and "release on cancellation" and "partial dispatch" stop being rules anyone implements. |
+| Allocation is **advisory, not a lock** | Two people dispatching in the same second can both pass. Accepted for one supervisor and one godown, with bricks physically counted onto the lorry and `remaining` reconcilable afterwards. Revisit if a second godown opens. |
+| Server-action **decisions** live in pure functions | Next.js server actions cannot be driven over HTTP from a script (encrypted action ids, no request context), so the rules were lifted into `decideStageChange` and the `can*Task*` family and the actions now call them. The boundary did not move: roles are still read from the DB inside the action. |
 | Base price matrix = the **0–20 km band** | The owner's rate chart prices by distance and has no factory-gate column. Stated as an assumption; change in Settings → Price matrix if collection differs. |
 
 ## Conventions
@@ -70,7 +85,15 @@ start of every session. Update whenever a decision is made.
 ## Known issues
 
 - 16 ESLint warnings, all pre-existing unused imports.
-- `scripts/e2e/run-db.ts` still exercises the pre-payment-gate story. It
-  compiles and passes, but no longer covers the real acceptance flow.
-- Navigation is 33 flat entries across 79 routes. See
-  [PLAN.md](PLAN.md) phase 2.
+- `Settings.stockAllocationEnforced` has been pushed to the **throwaway test
+  database only**. Production still lacks the column, so the automation page
+  will error there until it is pushed. One additive `ADD COLUMN`, no `DROP`
+  (`migrate diff` checked). **Needs explicit confirmation before pushing.**
+- The branch is **7+ commits ahead of `main` with no upstream** — none of
+  this is on GitHub yet.
+- `changePassword` in `settings/actions.ts` changes **the first `role: "admin"`
+  user's** password, not the signed-in user's. A manager changing "their"
+  password edits the owner's row (they must still know the old one, so it is
+  not an escalation), and it throws outright if the owner's role string is
+  `owner` rather than `admin`. Found during this work; **not fixed** —
+  flagged for a decision.

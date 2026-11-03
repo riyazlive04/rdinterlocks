@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
-import { canAssignTo, canDelegate, canManageTaskOf, roleLabel } from "@/lib/roles";
+import {
+  canCreateTaskFor,
+  canDeleteTask,
+  canReassignTask,
+  canUpdateTaskStatus,
+} from "@/lib/roles";
 
 // ─── The one rule every action below shares ────────────────────────────
 //
@@ -40,13 +45,6 @@ async function loadTaskWithAssignee(id: string) {
 
 // The refusal an actor sees when they reach sideways or upward. Names both
 // roles, because a bare "not allowed" reads like a bug to the user.
-function refuseAssignment(actorRole: string, targetRole: string): never {
-  throw new Error(
-    `A ${roleLabel(actorRole)} cannot assign work to a ${roleLabel(targetRole)}. ` +
-      "Tasks only travel down the chain of command."
-  );
-}
-
 const createSchema = z.object({
   title: z.string().min(1),
   details: z.string().optional(),
@@ -64,9 +62,6 @@ const createSchema = z.object({
  */
 export async function createTask(input: z.infer<typeof createSchema>) {
   const session = await requireSession();
-  if (!canDelegate(session.role)) {
-    throw new Error(`A ${roleLabel(session.role)} cannot assign tasks to anyone.`);
-  }
   const p = createSchema.parse(input);
 
   // The loaded role decides — not where p.assignedToId came from.
@@ -75,8 +70,8 @@ export async function createTask(input: z.infer<typeof createSchema>) {
     select: { id: true, role: true, active: true },
   });
   if (!assignee) throw new Error("Pick who to assign the task to");
-  if (!assignee.active) throw new Error("That user is disabled and cannot take new work");
-  if (!canAssignTo(session.role, assignee.role)) refuseAssignment(session.role, assignee.role);
+  const decision = canCreateTaskFor(session.role, assignee);
+  if (!decision.allowed) throw new Error(decision.reason);
 
   await prisma.task.create({
     data: {
@@ -102,11 +97,12 @@ export async function setTaskStatus(id: string, done: boolean) {
   const session = await requireSession();
   const task = await loadTaskWithAssignee(id);
 
-  const isAssignee = task.assignedToId === session.userId;
-  const outranks = canManageTaskOf(session.role, task.assignedTo.role);
-  if (!isAssignee && !outranks) {
-    throw new Error("You can only update your own tasks, or your team's.");
-  }
+  const decision = canUpdateTaskStatus(session, {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  });
+  if (!decision.allowed) throw new Error(decision.reason);
 
   await prisma.task.update({
     where: { id },
@@ -137,9 +133,12 @@ export async function setTaskStatusReason(taskId: string, reason: string) {
   const session = await requireSession();
   const task = await loadTaskWithAssignee(taskId);
 
-  const isAssignee = task.assignedToId === session.userId;
-  const outranks = canManageTaskOf(session.role, task.assignedTo.role);
-  if (!isAssignee && !outranks) {
+  const reasonDecision = canUpdateTaskStatus(session, {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  });
+  if (!reasonDecision.allowed) {
     throw new Error("You can only park your own tasks, or your team's.");
   }
 
@@ -162,24 +161,25 @@ export async function setTaskStatusReason(taskId: string, reason: string) {
  */
 export async function reassignTask(taskId: string, newAssigneeId: string) {
   const session = await requireSession();
-  if (!canDelegate(session.role)) {
-    throw new Error(`A ${roleLabel(session.role)} cannot reassign tasks.`);
-  }
   const task = await loadTaskWithAssignee(taskId);
-
-  const isCreator = task.createdById === session.userId;
-  if (!isCreator && !canManageTaskOf(session.role, task.assignedTo.role)) {
-    throw new Error("You can only reassign tasks you created, or ones that sit under you.");
-  }
 
   const next = await prisma.user.findUnique({
     where: { id: newAssigneeId },
     select: { id: true, role: true, active: true },
   });
   if (!next) throw new Error("Pick who to reassign the task to");
-  if (!next.active) throw new Error("That user is disabled and cannot take new work");
   if (next.id === task.assignedToId) return; // nothing to do
-  if (!canAssignTo(session.role, next.role)) refuseAssignment(session.role, next.role);
+
+  const decision = canReassignTask(
+    session,
+    {
+      assignedToId: task.assignedToId,
+      createdById: task.createdById,
+      assigneeRole: task.assignedTo.role,
+    },
+    next
+  );
+  if (!decision.allowed) throw new Error(decision.reason);
 
   await prisma.task.update({
     where: { id: taskId },
@@ -199,11 +199,12 @@ export async function deleteTask(id: string) {
   const session = await requireSession();
   const task = await loadTaskWithAssignee(id);
 
-  const isCreator = task.createdById === session.userId;
-  const outranks = canManageTaskOf(session.role, task.assignedTo.role);
-  if (!isCreator && !outranks) {
-    throw new Error("Only whoever assigned this task — or their senior — can delete it.");
-  }
+  const decision = canDeleteTask(session, {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  });
+  if (!decision.allowed) throw new Error(decision.reason);
 
   await prisma.task.delete({ where: { id } });
   revalidatePath("/tasks");

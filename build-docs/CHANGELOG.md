@@ -184,3 +184,36 @@ Tests: scripts/e2e/run-allocation.ts, 51/51. ALLOC-10 carries a verbatim copy
 of the original page logic and compared 591 order allocations across 200
 generated scenarios with zero disagreement — the refactor is checked against
 the behaviour it claimed to preserve, not just against itself.
+
+### Testing gaps closed, and CI
+Every gap recorded in TESTING.md is now closed. **626 assertions, 0 failures**,
+run against a throwaway Postgres and again from an empty database.
+
+- **`run-rbac.ts` had never been executed** — it was type-checked only. Run
+  end to end: 50/50.
+- **`run-db.ts` tested a retired code path.** `TC-DBQ-06` called
+  `convertQuotationToOrder` directly, which no user can reach since the
+  payment gate landed, so a regression in the gate would not have shown up.
+  Rewritten to drive sent → payment recorded → manager approves → order,
+  keeping every original assertion and adding the gate's own: a claim banks
+  no money and creates no order, approval writes exactly one cashbook entry,
+  a second approval double-counts nothing. 105 → 121 assertions.
+- **Stage transitions and task delegation were untested.** Server actions
+  cannot be driven over HTTP from a script, so the *decisions* were extracted
+  into pure functions — `decideStageChange`, and `canCreateTaskFor` /
+  `canUpdateTaskStatus` / `canReassignTask` / `canDeleteTask` — and the
+  actions now call them. `run-actions.ts`: 135/135, including the full 4×4
+  stage matrix and the assignee-may-complete-but-not-delete pair.
+- **CI** (`.github/workflows/ci.yml`): typecheck, lint, both suite groups and
+  the build, on every push and PR, against a disposable Postgres service
+  container. CI holds no secrets.
+- npm scripts: `typecheck`, `test:unit`, `test:db`, `test:pdf`, `test`,
+  `test:seed`.
+
+**A real footgun found while wiring CI.** Every suite guards on
+`DATABASE_URL`, but `prisma db push` and `prisma migrate` connect through
+**`directUrl`**, and `.env` points `DIRECT_URL` at live Supabase. Overriding
+`DATABASE_URL` alone passed every existing guard and would have pushed the
+schema to production and then run `prisma/seed.ts`, which truncates 34 tables.
+`scripts/guard-local-db.mjs` now requires both urls to be local and fronts
+`npm run test:seed`.

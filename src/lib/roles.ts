@@ -85,3 +85,101 @@ export function canDelegate(actorRole: string): boolean {
 export function canManageTaskOf(actorRole: string, assigneeRole: string): boolean {
   return canAssignTo(actorRole, assigneeRole);
 }
+
+// ─── Task authorization decisions ─────────────────────────────────────
+//
+// The rules the task server actions enforce, as pure functions. They live
+// here rather than inside the actions so they can be tested without a request
+// context — the actions keep what only they can do (authenticate, load the
+// subject's role from the database, write). The security boundary is
+// unchanged: every role passed in is still one the action read from the DB,
+// never one that arrived with the request.
+
+export type Actor = { userId: string; role: string };
+/** The assignee, as loaded from the database. */
+export type TaskSubject = {
+  assignedToId: string;
+  /** Nullable: the creator's account may since have been deleted. */
+  createdById: string | null;
+  assigneeRole: string;
+};
+
+export type Decision = { allowed: true } | { allowed: false; reason: string };
+
+const allow: Decision = { allowed: true };
+const deny = (reason: string): Decision => ({ allowed: false, reason });
+
+/**
+ * Hand a task to someone.
+ *
+ * Two gates, in order: can this role hand out work at all (a telecaller never
+ * does), then may it hand work to THIS person. The assignee must also be
+ * active — a disabled account cannot take new work, or the task lands on
+ * somebody who can no longer sign in to see it.
+ */
+export function canCreateTaskFor(
+  actorRole: string,
+  assignee: { role: string; active: boolean }
+): Decision {
+  if (!canDelegate(actorRole)) {
+    return deny(`A ${roleLabel(actorRole)} cannot assign tasks to anyone.`);
+  }
+  if (!assignee.active) return deny("That user is disabled and cannot take new work");
+  if (!canAssignTo(actorRole, assignee.role)) {
+    return deny(
+      `A ${roleLabel(actorRole)} cannot assign work to a ${roleLabel(assignee.role)}. ` +
+        "Tasks only travel down the chain of command."
+    );
+  }
+  return allow;
+}
+
+/**
+ * Flip a task done / open, or note why it is stuck.
+ *
+ * Completing your own work is yours by right, so the assignee passes on id.
+ * Anyone else has to outrank them. A telecaller therefore updates their own
+ * task and nothing else — not even another telecaller's, since the chain
+ * never runs sideways.
+ */
+export function canUpdateTaskStatus(actor: Actor, task: TaskSubject): Decision {
+  if (task.assignedToId === actor.userId) return allow;
+  if (canManageTaskOf(actor.role, task.assigneeRole)) return allow;
+  return deny("You can only update your own tasks, or your team's.");
+}
+
+/** Move a task to someone else: must outrank the current holder AND the new one. */
+export function canReassignTask(
+  actor: Actor,
+  task: TaskSubject,
+  next: { role: string; active: boolean }
+): Decision {
+  if (!canDelegate(actor.role)) {
+    return deny(`A ${roleLabel(actor.role)} cannot reassign tasks.`);
+  }
+  const isCreator = task.createdById === actor.userId;
+  if (!isCreator && !canManageTaskOf(actor.role, task.assigneeRole)) {
+    return deny("You can only reassign tasks you created, or ones that sit under you.");
+  }
+  if (!next.active) return deny("That user is disabled and cannot take new work");
+  if (!canAssignTo(actor.role, next.role)) {
+    return deny(
+      `A ${roleLabel(actor.role)} cannot assign work to a ${roleLabel(next.role)}. ` +
+        "Tasks only travel down the chain of command."
+    );
+  }
+  return allow;
+}
+
+/**
+ * Remove a task altogether.
+ *
+ * The creator (it was their instruction to withdraw) or someone who outranks
+ * the assignee. Pointedly NOT the assignee on their own strength: finishing
+ * the work is theirs, deciding it never needed doing is not.
+ */
+export function canDeleteTask(actor: Actor, task: TaskSubject): Decision {
+  if (task.createdById === actor.userId) return allow;
+  if (canManageTaskOf(actor.role, task.assigneeRole)) return allow;
+  return deny("Only whoever assigned this task — or their senior — can delete it.");
+}

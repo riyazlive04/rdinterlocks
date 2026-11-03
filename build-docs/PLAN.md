@@ -1,9 +1,10 @@
 # Master plan — RD Interlock Factory OS
 
-**Status: retrospective.** The build workflow requiring this document arrived
-after the features below were built and committed. This records what was built
-and why, and is the forward plan from here. Phases 6+ are not started and are
-the part that needs approval before code.
+**Status: phases 1-8 built.** The build workflow requiring this document
+arrived after phases 1-5 were already committed, so this began as a record of
+what was built and why. Phases 6-8 were then designed and built against it,
+each with its own feature doc. Phase 9 remains blocked on the provider, and
+the pricing data waits on the owner's updated rate chart.
 
 ## Goal and scope
 
@@ -37,9 +38,9 @@ nothing quoted before it is priced, nothing priced before leads arrive.
 | 3 | Quotation review gate | [features/quotation-review-gate.md](features/quotation-review-gate.md) | Built |
 | 4 | Role hierarchy + duty presence | [features/role-hierarchy.md](features/role-hierarchy.md) | Built |
 | 5 | Payment approval → order | [features/payment-approval.md](features/payment-approval.md) | Built |
-| 6 | Navigation regrouped by role | — | **Not started** |
-| 7 | Outstanding balance + collections | — | **Not started** |
-| 8 | Stock reservation against an order | — | **Not started** |
+| 6 | Navigation regrouped by role | [features/navigation-by-role.md](features/navigation-by-role.md) | Built |
+| 7 | Outstanding balance + collections | [features/outstanding-collections.md](features/outstanding-collections.md) | Built |
+| 8 | Stock allocation against an order | [features/stock-allocation.md](features/stock-allocation.md) | Built (as allocation, not reservation — see the doc) |
 | 9 | Call recordings | — | Blocked on the provider |
 
 ## Phase 6 — navigation regrouped by role

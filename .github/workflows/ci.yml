@@ -1,0 +1,87 @@
+name: CI
+
+# Every run so far had been manual, which is the whole reason this file
+# exists: the suites refuse to run against the production database by design,
+# so they need a throwaway Postgres to run against, and nothing was standing
+# one up automatically.
+#
+# The database here is a disposable service container. It never has, and must
+# never be given, the production DATABASE_URL — the suites would refuse it
+# anyway (each checks the host is local), but the point is that CI has no
+# secret to leak.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: rditest
+          POSTGRES_PASSWORD: rditest
+          POSTGRES_DB: rditest
+        ports:
+          - 5432:5432
+        # Without this the first prisma command races the server's startup.
+        options: >-
+          --health-cmd "pg_isready -U rditest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # 127.0.0.1, not "postgres": the suites' guard rail only accepts a local
+      # host, and that guard is what keeps them off the live database.
+      DATABASE_URL: postgres://rditest:rditest@127.0.0.1:5432/rditest
+      DIRECT_URL: postgres://rditest:rditest@127.0.0.1:5432/rditest
+      # Test-only values. Real ones live in .env, which is gitignored and
+      # never reaches CI.
+      SESSION_SECRET: ci-session-secret-not-a-real-one
+      CRON_API_KEY: ci-cron-key
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Push schema and seed the throwaway database
+        run: npm run test:seed
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Split from the database suites so a failure says which half broke.
+      - name: Unit suites (no database)
+        run: npm run test:unit
+
+      - name: Database suites
+        run: npm run test:db
+
+      # The PDF suite needs a headless Chrome and is kept separate for it: a
+      # missing browser is an environment problem, not a code regression, so
+      # it must not be able to fail the run in a way that looks like one.
+      - name: PDF suite
+        run: npm run test:pdf
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build

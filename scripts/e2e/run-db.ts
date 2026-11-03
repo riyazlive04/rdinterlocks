@@ -9,6 +9,12 @@
  * the hosted Supabase database by accident. Override only for a database you
  * are willing to have written to, with E2E_ALLOW_REMOTE_DB=yes.
  *
+ * TC-DBQ-06 drives the REAL order-to-cash path (sent -> payment recorded ->
+ * manager approves -> order). It used to call convertQuotationToOrder
+ * directly, which is the pre-payment-gate story: it passed, but it exercised
+ * a route no user can take any more, so a regression in the gate itself
+ * would not have shown up here.
+ *
  * Setup (throwaway Postgres in Docker):
  *   docker run -d --name rd-e2e-pg -e POSTGRES_PASSWORD=e2epass \
  *     -e POSTGRES_DB=rdtest -p 55432:5432 postgres:16-alpine
@@ -32,6 +38,12 @@ import {
   convertQuotationToOrder,
   financialYearLabel,
 } from "@/lib/quote";
+import bcrypt from "bcryptjs";
+import {
+  recordQuotationPayment,
+  approveQuotationPayment,
+  paymentTotals,
+} from "@/lib/quote-payment";
 import { sendWaMessage } from "@/lib/whatsapp-send";
 import { triggerWaSequencesForStage } from "@/lib/lead-stage";
 
@@ -276,83 +288,177 @@ const TC_DBQ05 = tc("TC-DBQ-05", "Quotation numbers are sequential, FY-scoped an
   await prisma.quotationCounter.deleteMany({ where: { id: { in: [fy, otherFy] } } });
 });
 
-const TC_DBQ06 = tc("TC-DBQ-06", "Quotation acceptance converts to an order exactly once", async () => {
-  const size = await prisma.brickSize.findFirstOrThrow();
-  const type = await prisma.constructionType.findFirstOrThrow();
-  const lead = await makeLead({ stageSlug: "quoted" });
-  const fy = financialYearLabel(new Date());
+const TC_DBQ06 = tc(
+  "TC-DBQ-06",
+  "The real spine: sent -> payment recorded -> manager approves -> order, once",
+  async () => {
+    const size = await prisma.brickSize.findFirstOrThrow();
+    const type = await prisma.constructionType.findFirstOrThrow();
+    const lead = await makeLead({ stageSlug: "quoted" });
+    const fy = financialYearLabel(new Date());
 
-  const quotation = await prisma.$transaction(async (tx) => {
-    const number = await nextQuotationNumber(tx, `E2E-${randomUUID().slice(0, 6)}`);
-    return tx.quotation.create({
-      data: {
-        number,
-        financialYear: fy,
-        leadId: lead.id,
-        customerName: `${TAG} Buyer`,
-        customerPhone: "9876543210",
-        place: "Salem",
-        subtotal: 2500,
-        total: 2500,
-        items: {
-          create: [
-            {
-              brickSizeId: size.id,
-              constructionTypeId: type.id,
-              quantity: 100,
-              unitPrice: 25,
-              total: 2500,
-            },
-          ],
+    const quotation = await prisma.$transaction(async (tx) => {
+      const number = await nextQuotationNumber(tx, `E2E-${randomUUID().slice(0, 6)}`);
+      return tx.quotation.create({
+        data: {
+          number,
+          financialYear: fy,
+          leadId: lead.id,
+          customerName: `${TAG} Buyer`,
+          customerPhone: "9876543210",
+          place: "Salem",
+          subtotal: 2500,
+          total: 2500,
+          items: {
+            create: [
+              {
+                brickSizeId: size.id,
+                constructionTypeId: type.id,
+                quantity: 100,
+                unitPrice: 25,
+                total: 2500,
+              },
+            ],
+          },
         },
+      });
+    });
+
+    const approver = await prisma.user.create({
+      data: {
+        name: uniq(),
+        pinHash: await bcrypt.hash("Unique@Pass9", 10),
+        role: "manager",
+        permissions: [],
+        active: true,
       },
     });
-  });
 
-  // A draft must be marked sent before it can be accepted.
-  let draftError = "";
-  try {
-    await convertQuotationToOrder(quotation.id);
-  } catch (e) {
-    draftError = (e as Error).message;
+    // ─── A draft has no price the customer has seen ──────────────────
+    let draftError = "";
+    try {
+      await recordQuotationPayment(quotation.id, { amount: 2500 }, approver.id);
+    } catch (e) {
+      draftError = (e as Error).message;
+    }
+    ok("a draft quotation cannot take a payment", /sent/i.test(draftError), draftError);
+
+    let draftConvert = "";
+    try {
+      await convertQuotationToOrder(quotation.id);
+    } catch (e) {
+      draftConvert = (e as Error).message;
+    }
+    ok("and the conversion refuses a draft too", /sent/i.test(draftConvert), draftConvert);
+
+    await prisma.quotation.update({
+      where: { id: quotation.id },
+      data: { status: "sent", sentAt: new Date() },
+    });
+
+    // ─── Recording is a CLAIM, not money, and creates no order ───────
+    const paymentId = await recordQuotationPayment(
+      quotation.id,
+      { amount: 2500, method: "upi", reference: "UTR-E2E-1" },
+      approver.id
+    );
+    const claimed = await paymentTotals(quotation.id);
+    eq("the payment sits pending", claimed.pending, 2500);
+    eq("nothing is banked yet", claimed.approved, 0);
+    eq(
+      "and NO order exists on the strength of a claim",
+      (await prisma.quotation.findUniqueOrThrow({ where: { id: quotation.id } })).orderId,
+      null
+    );
+    eq(
+      "the cashbook is untouched",
+      await prisma.clientPayment.count({ where: { notes: `Quotation ${quotation.number}` } }),
+      0
+    );
+
+    // ─── Approval is what creates the order ──────────────────────────
+    const approved = await approveQuotationPayment(paymentId, approver.id, "verified in bank");
+    const clientId = approved.clientId;
+    ok("approval returns a client id", !!clientId);
+
+    const after = await prisma.quotation.findUniqueOrThrow({ where: { id: quotation.id } });
+    eq("the quotation is now accepted", after.status, "accepted");
+    ok("it is linked to the created order", !!after.orderId);
+    eq("and to the order approval returned", after.orderId, approved.orderId);
+
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id: after.orderId! },
+      include: { items: true },
+    });
+    eq("the order has one line", order.items.length, 1);
+    eq("the FROZEN price was copied, not re-derived", order.items[0].pricePerBrick, 25);
+    eq("the frozen quantity was copied", order.items[0].quantity, 100);
+    ok("the order records who approved it", !!order.approvedAt && !!order.approvedByUserId);
+    eq("and it is queued for the supervisor", order.fulfilmentStage, "queued");
+
+    // ─── Exactly one authoritative money record ──────────────────────
+    const cash = await prisma.clientPayment.findMany({ where: { orderId: order.id } });
+    eq("exactly one cashbook payment", cash.length, 1);
+    eq("for the approved amount", cash[0]?.amount, 2500);
+    ok("attached to a cash entry", !!cash[0]?.cashEntryId);
+    const settled = await paymentTotals(quotation.id);
+    eq("approved money now covers the quotation", settled.balance, 0);
+    eq("and nothing is left pending", settled.pending, 0);
+
+    // A client had to be created, since the quotation came from a lead only.
+    const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
+    ok(
+      "the new client records its origin",
+      client.notes?.includes(quotation.number) ?? false,
+      String(client.notes)
+    );
+
+    // The lead moves to the won stage, with history, and nurturing stops.
+    const movedLead = await prisma.lead.findUniqueOrThrow({
+      where: { id: lead.id },
+      include: { stage: true },
+    });
+    eq("the lead landed in a won stage", movedLead.stage?.isWon, true);
+    eq("quotationStage was updated too", movedLead.quotationStage, "won");
+    const history = await prisma.leadStageHistory.findMany({ where: { leadId: lead.id } });
+    ok(
+      "a stage-history row was written",
+      history.some((h) => h.note === "Quotation accepted"),
+      JSON.stringify(history)
+    );
+
+    // ─── Idempotency: a second approval creates nothing ──────────────
+    const ordersBefore = await prisma.order.count();
+    const cashBefore = await prisma.clientPayment.count();
+    let twiceError = "";
+    try {
+      await approveQuotationPayment(paymentId, approver.id, "again");
+    } catch (e) {
+      twiceError = (e as Error).message;
+    }
+    ok(
+      "approving the same payment twice is refused",
+      /already (been )?approved/i.test(twiceError),
+      twiceError
+    );
+    eq("and no second order was created", await prisma.order.count(), ordersBefore);
+    eq("and the cashbook was not double-counted", await prisma.clientPayment.count(), cashBefore);
+
+    // The retired direct path still cannot create a second order either.
+    let convertError = "";
+    try {
+      await convertQuotationToOrder(quotation.id);
+    } catch (e) {
+      convertError = (e as Error).message;
+    }
+    ok(
+      "a direct conversion is refused once an order exists",
+      /already been accepted/i.test(convertError),
+      convertError
+    );
+    eq("still one order", await prisma.order.count(), ordersBefore);
   }
-  ok("a draft quotation cannot be accepted", /sent/i.test(draftError), draftError);
-
-  await prisma.quotation.update({ where: { id: quotation.id }, data: { status: "sent", sentAt: new Date() } });
-  const clientId = await convertQuotationToOrder(quotation.id);
-  ok("acceptance returns a client id", !!clientId);
-
-  const after = await prisma.quotation.findUniqueOrThrow({ where: { id: quotation.id } });
-  eq("the quotation is now accepted", after.status, "accepted");
-  ok("it is linked to the created order", !!after.orderId);
-
-  const order = await prisma.order.findUniqueOrThrow({ where: { id: after.orderId! }, include: { items: true } });
-  eq("the order has one line", order.items.length, 1);
-  eq("the FROZEN price was copied, not re-derived", order.items[0].pricePerBrick, 25);
-  eq("the frozen quantity was copied", order.items[0].quantity, 100);
-
-  // A client had to be created, since the quotation came from a lead only.
-  const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
-  ok("the new client records its origin", client.notes?.includes(quotation.number) ?? false, String(client.notes));
-
-  // The lead moves to the won stage, with history, and nurturing stops.
-  const movedLead = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id }, include: { stage: true } });
-  eq("the lead landed in a won stage", movedLead.stage?.isWon, true);
-  eq("quotationStage was updated too", movedLead.quotationStage, "won");
-  const history = await prisma.leadStageHistory.findMany({ where: { leadId: lead.id } });
-  ok("a stage-history row was written", history.some((h) => h.note === "Quotation accepted"), JSON.stringify(history));
-
-  // Second acceptance is refused and creates nothing.
-  const ordersBefore = await prisma.order.count();
-  let twiceError = "";
-  try {
-    await convertQuotationToOrder(quotation.id);
-  } catch (e) {
-    twiceError = (e as Error).message;
-  }
-  ok("accepting twice is refused", /already been accepted/i.test(twiceError), twiceError);
-  eq("and no second order was created", await prisma.order.count(), ordersBefore);
-});
+);
 
 
 const TC_DBQ07 = tc("TC-DBQ-07", "An expired quotation cannot be converted into an order", async () => {
@@ -733,10 +839,24 @@ async function cleanup() {
     where: { OR: [{ leadId: { in: allLeadIds } }, { customerName: { contains: TAG } }] },
     select: { id: true, orderId: true },
   });
+  const orderIds = quotations.map((q) => q.orderId).filter((x): x is string => !!x);
+
+  // The money records the payment gate writes. The CashEntry is the PARENT
+  // row, so deleting the ClientPayment alone strands it in the cashbook —
+  // exactly the mistake a throwaway script once made against production,
+  // which is why the ids are collected first and deleted explicitly.
+  const clientPayments = await prisma.clientPayment.findMany({
+    where: { orderId: { in: orderIds } },
+    select: { cashEntryId: true },
+  });
+  await prisma.clientPayment.deleteMany({ where: { orderId: { in: orderIds } } });
+  const cashIds = clientPayments.map((pay) => pay.cashEntryId).filter((x): x is string => !!x);
+  if (cashIds.length) await prisma.cashEntry.deleteMany({ where: { id: { in: cashIds } } });
+
+  await prisma.quotationPayment.deleteMany({ where: { quotationId: { in: quotations.map((q) => q.id) } } });
   await prisma.quotationItem.deleteMany({ where: { quotationId: { in: quotations.map((q) => q.id) } } });
   await prisma.quotation.deleteMany({ where: { id: { in: quotations.map((q) => q.id) } } });
 
-  const orderIds = quotations.map((q) => q.orderId).filter((x): x is string => !!x);
   await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
   await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
 
@@ -748,6 +868,14 @@ async function cleanup() {
   await prisma.deliveryZone.deleteMany({ where: { name: { startsWith: TAG } } });
   await prisma.brickSize.deleteMany({ where: { label: { startsWith: TAG } } });
   await prisma.quotationCounter.deleteMany({ where: { id: { startsWith: "E2E-" } } });
+
+  // The approver fixture. DutySession and Task cascade from User, so those
+  // go with it; LeadActivity does not, hence the explicit delete.
+  const users = await prisma.user.findMany({ where: { name: { startsWith: TAG } }, select: { id: true } });
+  for (const u of users) {
+    await prisma.leadActivity.deleteMany({ where: { userId: u.id } });
+    await prisma.user.delete({ where: { id: u.id } }).catch(() => {});
+  }
 }
 
 void (async () => {
