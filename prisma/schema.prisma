@@ -222,6 +222,16 @@ model Settings {
   /// Days after `quoteDate` that an unanswered sent quotation is marked
   /// expired by the sweep. 0 disables expiry.
   quoteExpiryDays Int @default(0)
+
+  /// Refuse a delivery that would take ready bricks already allocated to an
+  /// order ahead of it in the production queue (see lib/allocation.ts).
+  ///
+  /// OFF by default, like every other flag here: a deploy must not change the
+  /// desk's workflow, and the failure mode of a wrong check is that dispatch
+  /// stops — the worst outcome in this feature. Off still names the shortfall
+  /// and who is holding the stock; on turns that warning into a refusal.
+  /// Owner/manager can override case by case either way.
+  stockAllocationEnforced Boolean @default(false)
 }
 
 model Machine {

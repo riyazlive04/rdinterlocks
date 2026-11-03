@@ -14,6 +14,7 @@ import {
   waitingLabel,
   type FulfilmentStage,
 } from "../fulfilment/stage";
+import { unallocatedStock, type AllocatableOrder } from "@/lib/allocation";
 
 const QUEUE_PREVIEW = 60;
 const PER_STAGE_PREVIEW = 3;
@@ -79,6 +80,37 @@ export default async function SupervisorPanel({ session }: { session: Session })
   const readyBySize = new Map(readyStock.map((r) => [r.brickSizeId, r._sum.remaining ?? 0]));
   const totalReady = [...readyBySize.values()].reduce((s, v) => s + v, 0);
 
+  // How much of that is actually FREE.
+  //
+  // This tile used to show the whole ready total as though it were available,
+  // while /fulfilment showed most of it already committed to orders in the
+  // queue — the same bricks read as free here and spoken for there. Both now
+  // read lib/allocation.ts.
+  //
+  // A second query rather than reusing `orders` above: that one is
+  // `take: QUEUE_PREVIEW`, and allocating against a truncated queue would
+  // under-count what is committed and overstate what is free.
+  const liveQueue = await prisma.order.findMany({
+    where: { approvedAt: { not: null }, status: { notIn: ["complete", "cancelled"] } },
+    select: {
+      id: true,
+      stageChangedAt: true,
+      fulfilmentStage: true,
+      items: { select: { brickSizeId: true, quantity: true } },
+      deliveries: { select: { items: { select: { brickSizeId: true, quantity: true } } } },
+    },
+  });
+  const allocatable: AllocatableOrder[] = liveQueue.map((o) => ({
+    id: o.id,
+    stageChangedAt: o.stageChangedAt,
+    fulfilmentStage: normalizeStage(o.fulfilmentStage),
+    ordered: o.items,
+    delivered: o.deliveries.flatMap((d) => d.items),
+  }));
+  const freeBySize = unallocatedStock(allocatable, readyBySize);
+  const totalFree = [...freeBySize.values()].reduce((s, v) => s + Math.max(0, v), 0);
+  const totalCommitted = totalReady - totalFree;
+
   type QueueOrder = (typeof orders)[number];
   const byStage = new Map<FulfilmentStage, QueueOrder[]>(
     FULFILMENT_STAGES.map((s) => [s, []])
@@ -143,7 +175,11 @@ export default async function SupervisorPanel({ session }: { session: Session })
         <StatCard
           label="Ready in godown"
           value={formatNumber(totalReady)}
-          sub="Cured and sellable"
+          sub={
+            totalCommitted > 0
+              ? `${formatNumber(totalFree)} free · ${formatNumber(totalCommitted)} committed`
+              : "Cured, and none of it spoken for"
+          }
           tone="success"
         />
         <StatCard
@@ -238,6 +274,11 @@ export default async function SupervisorPanel({ session }: { session: Session })
                     </div>
                     <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
                       {b.label}
+                    </div>
+                    {/* Free, spelled out in words — the number above is the
+                        godown count, not what the next order can have. */}
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      {formatNumber(Math.max(0, freeBySize.get(b.id) ?? 0))} free
                     </div>
                   </div>
                 ))}

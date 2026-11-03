@@ -6,6 +6,7 @@ import { isFullAccess } from "@/lib/roles";
 import { Card, EmptyState, PageHeader, Pill, StatCard } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate } from "@/lib/format";
+import { allocateReadyStock, type AllocatableOrder } from "@/lib/allocation";
 import { setOrderFulfilmentStage } from "./actions";
 import { StageControl } from "./stage-control";
 import {
@@ -73,16 +74,28 @@ export default async function FulfilmentPage() {
   const readyBySize = new Map(readyStock.map((r) => [r.brickSizeId, r._sum.remaining ?? 0]));
   const totalReady = [...readyBySize.values()].reduce((s, v) => s + v, 0);
 
-  // Godown readiness.
+  // Godown readiness, from lib/allocation.ts.
   //
   // Ready stock is a SHARED pool, so checking each order against the full
   // total independently would tell the supervisor that three orders are all
-  // dispatchable when there are only enough bricks for the first. Instead the
-  // pool is allocated down the queue in the same oldest-first order the page
-  // renders: each order is judged against what is left after the ones ahead
-  // of it have taken theirs. Dispatched orders are skipped — their bricks
-  // already left the godown, so they are not competing for this pool.
-  const pool = new Map(readyBySize);
+  // dispatchable when there are only enough bricks for the first. The
+  // allocator walks the queue oldest-first and judges each order against what
+  // is left after the ones ahead of it have taken theirs.
+  //
+  // This used to be sixty lines inline here, which meant the dashboard and
+  // the delivery form could not read it: the same stock showed as free there
+  // and committed on this page. It is now one shared, pure function.
+  const allocatable: AllocatableOrder[] = orders.map((o) => ({
+    id: o.id,
+    stageChangedAt: o.stageChangedAt,
+    fulfilmentStage: normalizeStage(o.fulfilmentStage),
+    ordered: o.items.map((it) => ({ brickSizeId: it.brickSizeId, quantity: it.quantity })),
+    delivered: o.deliveries.flatMap((d) =>
+      d.items.map((it) => ({ brickSizeId: it.brickSizeId, quantity: it.quantity }))
+    ),
+  }));
+  const allocation = allocateReadyStock(allocatable, readyBySize);
+  const orderNumber = new Map(orders.map((o, i) => [o.id, i + 1]));
 
   type Need = { label: string; need: number; have: number; short: number };
   type Row = {
@@ -92,54 +105,28 @@ export default async function FulfilmentPage() {
     pendingTotal: number;
     shortTotal: number;
     orderedValue: number;
+    blockedBy: string[];
   };
 
   const rows: Row[] = orders.map((o) => {
-    const stage = normalizeStage(o.fulfilmentStage);
-
-    // Ordered minus delivered, per brick size.
-    const pending = new Map<string, number>();
-    for (const it of o.items) {
-      pending.set(it.brickSizeId, (pending.get(it.brickSizeId) ?? 0) + it.quantity);
-    }
-    for (const d of o.deliveries) {
-      for (const it of d.items) {
-        pending.set(it.brickSizeId, (pending.get(it.brickSizeId) ?? 0) - it.quantity);
-      }
-    }
-
-    const needs: Need[] = [];
-    for (const [sizeId, qty] of pending) {
-      if (qty <= 0) continue;
-      if (stage === "dispatched") {
-        // Already gone — report it as met rather than claiming a shortfall
-        // against stock it no longer needs.
-        needs.push({
-          label: sizeLabel.get(sizeId) ?? "Unknown size",
-          need: qty,
-          have: qty,
-          short: 0,
-        });
-        continue;
-      }
-      const have = pool.get(sizeId) ?? 0;
-      const taken = Math.min(qty, have);
-      pool.set(sizeId, have - taken);
-      needs.push({
-        label: sizeLabel.get(sizeId) ?? "Unknown size",
-        need: qty,
-        have,
-        short: qty - taken,
-      });
-    }
-
+    const a = allocation.get(o.id);
     return {
       order: o,
-      stage,
-      needs,
-      pendingTotal: needs.reduce((s, n) => s + n.need, 0),
-      shortTotal: needs.reduce((s, n) => s + n.short, 0),
+      stage: normalizeStage(o.fulfilmentStage),
+      needs: (a?.needs ?? []).map((n) => ({
+        label: sizeLabel.get(n.brickSizeId) ?? "Unknown size",
+        need: n.need,
+        have: n.have,
+        short: n.short,
+      })),
+      pendingTotal: a?.pendingTotal ?? 0,
+      shortTotal: a?.shortTotal ?? 0,
       orderedValue: o.items.reduce((s, i) => s + i.total, 0),
+      // Named, so "why is this order short?" no longer means reading the
+      // whole queue to find who upstream took the stock.
+      blockedBy: (a?.blockedBy ?? []).map(
+        (id) => `#${orderNumber.get(id) ?? "?"} ${orders.find((x) => x.id === id)?.client.name ?? ""}`.trim()
+      ),
     };
   });
 
@@ -352,6 +339,13 @@ export default async function FulfilmentPage() {
                                   )
                                   .join(" · ")}
                               </div>
+                              {/* Who upstream took the stock. Text, never
+                                  colour alone — it is the actionable part. */}
+                              {!covered && r.blockedBy.length > 0 && (
+                                <div className="mt-1 font-medium">
+                                  Held by {r.blockedBy.join(", ")}
+                                </div>
+                              )}
                               {covered && stage === "ready" && (
                                 <Link
                                   href="/deliveries"

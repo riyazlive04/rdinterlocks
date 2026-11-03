@@ -11,6 +11,7 @@ export type AutomationSettings = {
   autoQuoteRequiresZone: boolean;
   leadAutoAssign: boolean;
   quoteExpiryDays: number;
+  stockAllocationEnforced: boolean;
 };
 
 type StageOption = { slug: string; name: string; isActive: boolean };
@@ -172,6 +173,18 @@ export function AutomationForm({
           hint="On: the sweep hands every unassigned open lead to one of the users who can see Leads, sharing them out evenly. Off: leads stay unassigned until someone picks them up — which is the state most Meta leads are in today."
           checked={form.leadAutoAssign}
           onChange={(v) => setForm({ ...form, leadAutoAssign: v })}
+        />
+      </Card>
+
+      <Card className="mb-4">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+          Godown stock
+        </div>
+        <Toggle
+          label="Refuse a delivery that takes another order's bricks"
+          hint="Ready stock is one shared pool, handed down the production queue oldest-order-first. On: a delivery that would take bricks already allocated to an earlier order is refused, naming the order holding them — an owner or manager can still dispatch it anyway, and the override is written onto the delivery. Off: the shortfall is shown on the production queue but nothing is blocked. This one does NOT need the scheduled sweep."
+          checked={form.stockAllocationEnforced}
+          onChange={(v) => setForm({ ...form, stockAllocationEnforced: v })}
         />
       </Card>
 

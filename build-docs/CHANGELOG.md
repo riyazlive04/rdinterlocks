@@ -140,3 +140,47 @@ numbers — six aggregates serve any number of clients. One behaviour change
 worth naming: the "N orders" pill no longer counts cancelled orders.
 
 Tests: scripts/e2e/run-collections.ts, 73/73.
+
+### Stock allocation against orders — phase 8
+Built **differently from the plan**, which proposed holding stock per order in
+a reservation table. Two findings changed the design:
+
+1. The allocation already existed, sixty lines inline in `fulfilment/page.tsx`
+   — ready stock was already handed down the queue oldest-first, so the
+   plan's "two orders can both be promised the same pallet" was already
+   half-solved on that one screen.
+2. A stored reservation would need keeping in step with order creation,
+   cancellation, partial dispatch, stage reversal and manual stock
+   corrections — six writers to one derived number, which is the risk the
+   plan itself flagged.
+
+So allocation is **derived on read** (`src/lib/allocation.ts`), holds nothing,
+and cannot drift. "Release on cancellation" and "partial dispatch" stop being
+rules anyone has to implement. Nothing was added to the payment-approval
+transaction, so an approval can still never fail because the godown is short.
+
+What the extraction fixed:
+- **The dashboard and the queue disagreed.** `supervisor-panel.tsx` showed the
+  whole ready total as available while `/fulfilment` showed most of it already
+  committed. Both now read the allocator; the tile reads "N free · N
+  committed".
+- **A shortfall now names who is holding the stock** (`blockedBy`), instead of
+  a bare number that meant reading the whole queue to explain.
+- **Dispatch can be refused** when a delivery would take an earlier order's
+  bricks — behind `Settings.stockAllocationEnforced`, **off by default**,
+  because the failure mode of a wrong check is that dispatch stops.
+  Owner/manager can override; the override is written onto the delivery.
+  `updateDelivery` checks only the *increase*, since the existing quantities
+  are already drawn down.
+
+Not a lock, and the feature doc says so: two people dispatching in the same
+second can both pass. Accepted for one supervisor and one godown.
+
+Schema: one additive `Settings.stockAllocationEnforced Boolean @default(false)`.
+`migrate diff` showed a single ADD COLUMN, no DROP. **Applied to the throwaway
+database only — not pushed to production.**
+
+Tests: scripts/e2e/run-allocation.ts, 51/51. ALLOC-10 carries a verbatim copy
+of the original page logic and compared 591 order allocations across 200
+generated scenarios with zero disagreement — the refactor is checked against
+the behaviour it claimed to preserve, not just against itself.

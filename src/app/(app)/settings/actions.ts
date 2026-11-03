@@ -617,6 +617,9 @@ const automationSchema = z.object({
   // 0 disables expiry. Capped at a year: a "validity" longer than that is a
   // typo, and the number is printed on a document the customer keeps.
   quoteExpiryDays: z.number().int().nonnegative().max(365).default(0),
+  // Off by default: the failure mode of a wrong allocation check is that
+  // dispatch stops, which is worse than the overdraw it prevents.
+  stockAllocationEnforced: z.boolean().default(false),
 });
 
 export async function updateAutomationSettings(data: z.infer<typeof automationSchema>) {
@@ -630,6 +633,7 @@ export async function updateAutomationSettings(data: z.infer<typeof automationSc
   revalidatePath("/settings/automation");
   revalidatePath("/quotations");
   revalidatePath("/leads");
+  revalidatePath("/fulfilment");
 }
 
 // ─── Security ─────────────────────────────────────────────────────────

@@ -5,6 +5,11 @@ import { requireArea, requireAnyArea } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { isFullAccess } from "@/lib/roles";
+import {
+  checkDeliveryAgainstAllocation,
+  type AllocatableOrder,
+} from "@/lib/allocation";
 
 // ─── Clients ──────────────────────────────────────────────────────────
 
@@ -318,7 +323,111 @@ const deliverySchema = z.object({
   returns: z.array(returnSchema).default([]),
   paymentReceived: z.number().nonnegative().default(0),
   paymentMethod: z.enum(["cash", "gpay", "bank", "upi", "cheque"]).default("cash"),
+  /// Dispatch anyway, taking stock allocated to an earlier order. Owner and
+  /// manager only — see assertAllocationAllows.
+  allowShortfall: z.boolean().default(false),
 });
+
+// ─── Stock allocation guard ───────────────────────────────────────────
+
+/**
+ * Refuse a delivery that would take ready bricks already allocated to an
+ * order AHEAD of this one in the production queue.
+ *
+ * Why a refusal and not a warning: a warning returned from a server action is
+ * a message nobody reads, and the failure it is guarding against —
+ * dispatching bricks an earlier customer was already promised — is only
+ * discovered when that customer rings to ask where theirs are.
+ *
+ * Why it is compared against the ALLOCATION and not against total ready
+ * stock: the whole problem is that total stock looks sufficient precisely
+ * when an earlier order has already been promised it.
+ *
+ * Three ways out, in order of preference: deliver less, produce more, or —
+ * for an owner or manager, who are the people entitled to decide which
+ * customer waits — override. The override is recorded on the delivery rather
+ * than left to look like a counting error. A supervisor gets the refusal and
+ * the name of the order holding the stock, which is what lets them go and
+ * ask.
+ *
+ * Off by default (Settings.stockAllocationEnforced), because the failure mode
+ * of a wrong check here is that dispatch stops.
+ */
+async function assertAllocationAllows(
+  orderId: string,
+  requested: Array<{ brickSizeId: string; quantity: number }>,
+  opts: { allowShortfall: boolean; role: string }
+): Promise<string | null> {
+  const settings = await prisma.settings.findUnique({
+    where: { id: "default" },
+    select: { stockAllocationEnforced: true },
+  });
+  if (!settings?.stockAllocationEnforced) return null;
+
+  const [queue, readyStock, sizes] = await Promise.all([
+    // The same queue the supervisor sees on /fulfilment: payment approved and
+    // still live. An order outside it is not competing for this pool.
+    prisma.order.findMany({
+      where: { approvedAt: { not: null }, status: { notIn: ["complete", "cancelled"] } },
+      select: {
+        id: true,
+        stageChangedAt: true,
+        fulfilmentStage: true,
+        client: { select: { name: true } },
+        items: { select: { brickSizeId: true, quantity: true } },
+        deliveries: { select: { items: { select: { brickSizeId: true, quantity: true } } } },
+      },
+    }),
+    prisma.stockBatch.groupBy({
+      by: ["brickSizeId"],
+      where: { stage: "ready", remaining: { gt: 0 } },
+      _sum: { remaining: true },
+    }),
+    prisma.brickSize.findMany({ select: { id: true, label: true } }),
+  ]);
+
+  // An order that never went through the approval gate (a direct sale) is not
+  // in the queue, so there is no allocation to check it against.
+  if (!queue.some((o) => o.id === orderId)) return null;
+
+  const orders: AllocatableOrder[] = queue.map((o) => ({
+    id: o.id,
+    stageChangedAt: o.stageChangedAt,
+    fulfilmentStage: o.fulfilmentStage,
+    ordered: o.items,
+    delivered: o.deliveries.flatMap((d) => d.items),
+  }));
+  const readyBySize = new Map(readyStock.map((r) => [r.brickSizeId, r._sum.remaining ?? 0]));
+
+  const check = checkDeliveryAgainstAllocation(orderId, requested, orders, readyBySize);
+  if (check.ok) return null;
+
+  const label = new Map(sizes.map((b) => [b.id, b.label]));
+  const name = new Map(queue.map((o) => [o.id, o.client.name]));
+  const detail = check.shortfalls
+    .map(
+      (sf) =>
+        `${label.get(sf.brickSizeId) ?? "bricks"}: ${sf.requested} requested, ${sf.allocated} allocated to this order`
+    )
+    .join("; ");
+  const holders = check.blockedBy.map((id) => name.get(id) ?? id).filter(Boolean);
+  const heldBy = holders.length ? ` Held for ${holders.join(", ")}.` : "";
+
+  if (opts.allowShortfall) {
+    if (!isFullAccess(opts.role)) {
+      throw new Error(
+        `Only an owner or manager can dispatch bricks allocated to an earlier order. ${detail}.${heldBy}`
+      );
+    }
+    // Allowed, and recorded by the caller in the delivery notes.
+    return `Dispatched over allocation: ${detail}.${heldBy}`;
+  }
+
+  throw new Error(
+    `Not enough ready stock allocated to this order. ${detail}.${heldBy} ` +
+      "Deliver less, produce more, or ask a manager to dispatch it anyway."
+  );
+}
 
 // ─── Stock draw-down on delivery ──────────────────────────────────────
 // Delivering bricks reduces READY stock; editing/deleting a delivery puts it
@@ -401,8 +510,8 @@ async function applyStockDeltas(deltas: Map<string, number>) {
   }
 }
 
-export async function createDelivery(input: z.infer<typeof deliverySchema>) {
-  await requireArea("sales");
+export async function createDelivery(input: z.input<typeof deliverySchema>) {
+  const session = await requireArea("sales");
   const p = deliverySchema.parse(input);
   const date = new Date(p.date);
   const order = await prisma.order.findUnique({
@@ -411,12 +520,21 @@ export async function createDelivery(input: z.infer<typeof deliverySchema>) {
   });
   if (!order) throw new Error("Order not found");
 
+  // Before anything is written: would this take bricks an earlier order was
+  // already promised? Throws unless it is covered or deliberately overridden.
+  const override = await assertAllocationAllows(p.orderId, p.items, {
+    allowShortfall: p.allowShortfall,
+    role: session.role,
+  });
+
   await prisma.delivery.create({
     data: {
       orderId: p.orderId,
       date,
       truckPlate: p.truckPlate?.trim() || null,
-      notes: p.notes,
+      // An override is recorded on the delivery, so an overdrawn godown
+      // carries its reason instead of looking like a counting error.
+      notes: [p.notes, override].filter(Boolean).join(" · ") || undefined,
       items: {
         create: p.items.map((it) => ({
           brickSizeId: it.brickSizeId,
@@ -496,10 +614,11 @@ const deliveryEditSchema = z.object({
   items: z.array(deliveryItemSchema).min(1),
   addOns: z.array(deliveryAddOnSchema).default([]),
   returns: z.array(returnSchema).default([]),
+  allowShortfall: z.boolean().default(false),
 });
 
-export async function updateDelivery(id: string, input: z.infer<typeof deliveryEditSchema>) {
-  await requireArea("sales");
+export async function updateDelivery(id: string, input: z.input<typeof deliveryEditSchema>) {
+  const session = await requireArea("sales");
   const p = deliveryEditSchema.parse(input);
   const existing = await prisma.delivery.findUnique({
     where: { id },
@@ -507,6 +626,34 @@ export async function updateDelivery(id: string, input: z.infer<typeof deliveryE
   });
   if (!existing) throw new Error("Delivery not found");
   const date = new Date(p.date);
+
+  // Only the INCREASE is checked against the allocation.
+  //
+  // This delivery's existing quantities have already been drawn out of stock
+  // and are already subtracted from the order's outstanding need, so the
+  // order's allocated remainder covers only what is still undelivered.
+  // Checking the full new quantities would therefore double-count the part
+  // that was already dispatched and refuse an edit that takes nothing new.
+  const before = new Map<string, number>();
+  for (const it of existing.items) {
+    before.set(it.brickSizeId, (before.get(it.brickSizeId) ?? 0) + it.quantity);
+  }
+  const increase: Array<{ brickSizeId: string; quantity: number }> = [];
+  const after = new Map<string, number>();
+  for (const it of p.items) {
+    after.set(it.brickSizeId, (after.get(it.brickSizeId) ?? 0) + it.quantity);
+  }
+  for (const [brickSizeId, qty] of after) {
+    const delta = qty - (before.get(brickSizeId) ?? 0);
+    if (delta > 0) increase.push({ brickSizeId, quantity: delta });
+  }
+
+  const override = increase.length
+    ? await assertAllocationAllows(existing.orderId, increase, {
+        allowShortfall: p.allowShortfall,
+        role: session.role,
+      })
+    : null;
 
   // Reverse the old delivery's stock draw-down, then apply the new one.
   const reversed = new Map<string, number>();
@@ -523,7 +670,7 @@ export async function updateDelivery(id: string, input: z.infer<typeof deliveryE
       data: {
         date,
         truckPlate: p.truckPlate?.trim() || null,
-        notes: p.notes,
+        notes: [p.notes, override].filter(Boolean).join(" · ") || undefined,
         items: {
           create: p.items.map((it) => ({
             brickSizeId: it.brickSizeId,

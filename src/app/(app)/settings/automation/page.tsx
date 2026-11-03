@@ -47,6 +47,7 @@ export default async function AutomationSettingsPage() {
           autoQuoteRequiresZone: s?.autoQuoteRequiresZone ?? true,
           leadAutoAssign: s?.leadAutoAssign ?? false,
           quoteExpiryDays: s?.quoteExpiryDays ?? 0,
+          stockAllocationEnforced: s?.stockAllocationEnforced ?? false,
         }}
         stages={stages}
         onSave={async (data) => {
