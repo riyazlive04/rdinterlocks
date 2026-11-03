@@ -131,7 +131,9 @@ export function UsersManager({
             role,
             permissions,
             active,
-            password: password.length >= 4 ? password : undefined,
+            // Validated above against the role's own minimum; a blank field
+            // means "keep the current password".
+            password: password || undefined,
           });
         }
         setEditing(null);

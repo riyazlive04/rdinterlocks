@@ -111,6 +111,10 @@ const defaultAreas = tc("RBAC-02", "default areas match each role's job", () => 
     ok("telecaller: NOT revenue", !can(tele, "revenue"));
     ok("telecaller: NOT reports", !can(tele, "reports"));
     ok("supervisor: production", can(sup, "production"));
+    // The die register is the supervisor's to keep — the mould goes in, gets
+    // flipped and gets retired on the floor, not in the office.
+    ok("supervisor: die register", can(sup, "die"));
+    ok("telecaller: NOT the die register", !can(tele, "die"));
     ok("supervisor: deliveries", can(sup, "deliveries"));
     ok("supervisor: NOT leads", !can(sup, "leads"));
     ok("supervisor: NOT revenue", !can(sup, "revenue"));

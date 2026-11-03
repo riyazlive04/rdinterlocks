@@ -248,3 +248,37 @@ Three of the items waiting on a decision could be settled without one.
   from the owner.
 
 Tests: `PW-01` in run-actions.ts. 154/154.
+
+### Die register — phase 10
+Resolves the `Die` / `DieUsage` open question. The owner's ruling: keep the
+tables and let the manager or supervisor maintain them.
+
+`/die` lists every die, both its faces, bricks pressed per face and cost per
+1000. A die goes in on side 1, is flipped to side 2 when the first face wears,
+and is retired when the second goes. A costed purchase books a `CashEntry` +
+`Expense` under "Mould (Die)".
+
+**Ported from `origin/feature/register-dies-avm-tipper-pl`** rather than
+written — that branch already had a working screen and the domain logic is
+sound. **What it did not have was any authorization: none of its four server
+actions called `requireArea` or `requireSession`.** A server action is a
+public HTTP endpoint whether or not a link points at it, and the security
+review on this branch found exactly that hole in `/api/export`. The gates
+added on the way in:
+
+| Action | Gate |
+|---|---|
+| View, register at no cost, flip, retire, reopen | area `die` (new; supervisor default) |
+| Register **with a cost** | `die` **and** `expense` — it books money |
+| Delete | `isFullAccess` — it removes the expense *and* its cash entry |
+
+Also wires `reopenDieSide`, which existed in the source branch's actions but
+was never passed to the view, and hides the delete control from a supervisor
+rather than showing it and refusing.
+
+No schema change — both models were already declared. `migrate diff` is empty.
+
+Tests: scripts/e2e/run-die.ts, 46/46, including the money unwind (DIE-07
+asserts no stranded `CashEntry`, the production incident in MEMORY) and the
+three authorization gates. Verified over HTTP: manager sees the page with the
+delete control, supervisor sees it without, telecaller is redirected.

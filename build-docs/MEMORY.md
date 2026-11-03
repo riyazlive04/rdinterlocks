@@ -39,7 +39,9 @@ start of every session. Update whenever a decision is made.
 | Delivery zones are **never inferred** from free-text `place` | The bands' area lists genuinely overlap ("Ammapettai" and "Thoppur" each appear in two). A wrong guess is a ₹4–6/brick error on a priced document. `Lead.zoneId` is set explicitly by whoever established it on the call. |
 | The quotation PDF is **frozen at submission** | The PDF route composes from current Settings, so a quotation approved in November re-rendered with January's terms. The reviewed bytes must be the sent bytes. |
 | Locking begins at **`approved`**, not `sent` | Once a PDF is frozen and approved, editing the quotation underneath invalidates the approval. |
-| `Die` / `DieUsage` kept in the schema | They existed in the live database but were never committed here, so the next push would have dropped them. Both turned out to be empty; retained pending a deliberate decision. |
+| `Die` / `DieUsage` kept, and given a screen | They existed in the live database but were never committed here, so the next push would have dropped them. Both empty. **Owner's ruling (2026-11-03): keep them and let the manager or supervisor maintain them.** Built as `/die`, ported from `origin/feature/register-dies-avm-tipper-pl` — whose four server actions had NO authorization at all; adding the gates was the work. |
+| A costed die needs **cashbook** access, not just `die` | Registering and flipping a mould is a shop-floor fact. Recording what it COST writes a `CashEntry` + `Expense`, so a supervisor without `expense` saves it at zero and a manager adds the amount — which is the normal order anyway, since the die arrives before the invoice. |
+| Deleting a die is **owner/manager only** | It removes the `Expense` *and* its `CashEntry`. Money leaving the books is not a shop-floor act — same reasoning as the payment-approval gate. |
 | Navigation grouping **grants nothing** | Phase 6 is presentation only: `groupedNav` calls `visibleNav` and partitions the result, so access rules keep sole authority. NAV-01 asserts set equality for every role — if grouping dropped an item a role would silently lose a route, and on mobile `/menu` is the only path to it. |
 | A supervisor's menu **keeps Clients & Sales** | The plan's acceptance said "only Make and Move". Wrong: `sales` is in `DEFAULT_AREAS_BY_ROLE.supervisor`, so hiding it would be an access change and would leave a page they can open with no link to it. |
 | Settings keeps its **existing 9 groups** | The plan proposed re-dividing Settings three ways. It is already grouped and only owner/manager see it, so collapsing 9 labelled groups into 3 larger ones loses information for no gain. Not done; deliberate. |
@@ -82,13 +84,18 @@ start of every session. Update whenever a decision is made.
 - **Lead intake direction.** The webhook contract assumes the provider pushes
   to us. `FACEBOOK_FEED_URL` is a pull relay. If the provider hands over a URL
   for us to call, that is `lib/facebook-feed.ts` plus a scheduled poll instead.
+  **Owner will supply the webhook details later (2026-11-03); nothing to do
+  until then.**
 - ~~**Password minimum is 4.**~~ **Resolved:** 8 for owner/admin/manager, 4
   kept for supervisor/telecaller/staff (a short code tapped into a tablet by
   the machine is not the account worth hardening, and raising it pushes the
   code onto a wall). `minPasswordLength` / `passwordProblem` in `lib/roles.ts`
   drive both the form and the server action. **Login is unchanged**, so
   existing short passwords keep working — the rule bites on the next change.
-  Forcing a reset is an open question.
+  **Owner's ruling (2026-11-03): no forced reset — the requirement will be
+  shown to the manager as a popup when the system moves to production.** That
+  popup is NOT built: it needs a "we are live now" signal that does not exist
+  yet.
 
 ## Known issues
 
@@ -96,7 +103,13 @@ start of every session. Update whenever a decision is made.
 - `Settings.stockAllocationEnforced` has been pushed to the **throwaway test
   database only**. Production still lacks the column, so the automation page
   will error there until it is pushed. One additive `ADD COLUMN`, no `DROP`
-  (`migrate diff` checked). **Needs explicit confirmation before pushing.**
+  (`migrate diff` checked). **Owner's instruction (2026-11-03): do not move to
+  production for now** — so it stays unpushed and the app is local-only until
+  they say otherwise.
+- **The production-time manager popup for the new password minimum is not
+  built.** Decided, not implemented: there is no signal for "we are in
+  production now". It needs a trigger (a Settings flag, or first run against
+  the live database) before it can exist.
 - The branch is **7+ commits ahead of `main` with no upstream** — none of
   this is on GitHub yet.
 - ~~`changePassword` changed the wrong user's password.~~ **Fixed:** it

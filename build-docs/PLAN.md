@@ -42,6 +42,7 @@ nothing quoted before it is priced, nothing priced before leads arrive.
 | 7 | Outstanding balance + collections | [features/outstanding-collections.md](features/outstanding-collections.md) | Built |
 | 8 | Stock allocation against an order | [features/stock-allocation.md](features/stock-allocation.md) | Built (as allocation, not reservation — see the doc) |
 | 9 | Call recordings | — | Blocked on the provider |
+| 10 | Die register (moulds) | [features/die-register.md](features/die-register.md) | Built |
 
 ## Phase 6 — navigation regrouped by role
 

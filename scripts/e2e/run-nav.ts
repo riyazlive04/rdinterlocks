@@ -116,7 +116,7 @@ const supervisor = tc("NAV-04", "a supervisor sees Make, Move and their granted 
   const nav = groupedNav(primaryNav, userFor("supervisor"));
   const byKey = new Map(nav.groups.map((g) => [g.key, g.items]));
   eq("Sell is Clients & Sales alone", ids(byKey.get("sell")!), ["sales"]);
-  eq("Make", ids(byKey.get("make")!), ["day", "fulfilment", "loading", "mason", "production"]);
+  eq("Make", ids(byKey.get("make")!), ["day", "die", "fulfilment", "loading", "mason", "production"]);
   eq("Move", ids(byKey.get("move")!), ["deliveries", "tipper"]);
   ok("no Money heading", !byKey.has("money"));
   ok("no Admin heading", !byKey.has("admin"));

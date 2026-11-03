@@ -4,6 +4,7 @@
 // (dashboard cash/profit, reports revenue, cashbook) rather than a page.
 export const ACCESS_AREAS = [
   { key: "production", label: "Production" },
+  { key: "die", label: "Dies (moulds)" },
   { key: "day", label: "Daily entry" },
   { key: "leads", label: "Leads (call enquiries)" },
   { key: "sales", label: "Clients & Sales" },
@@ -70,7 +71,11 @@ export const DEFAULT_AREAS_BY_ROLE: Record<string, string[]> = {
   admin: [],
   manager: [],
   // Runs production and gets stock out of the godown.
-  supervisor: ["production", "day", "deliveries", "loading", "tipper", "mason", "sales"],
+  // `die` is here because the register is theirs to keep: the mould goes
+  // in, gets flipped and gets retired on the floor, not in the office.
+  // Booking what it COST still needs `expense` on top — see
+  // app/(app)/die/actions.ts.
+  supervisor: ["production", "day", "deliveries", "loading", "tipper", "mason", "sales", "die"],
   // Works the phone: leads, the quotations they raise, reviewing them, and
   // sending them. `quoteReview` belongs here because the review gate was
   // built for exactly this person — the brief was that the quotation is

@@ -200,6 +200,14 @@ export const primaryNav: NavItem[] = [
     group: "money",
   },
   {
+    id: "die",
+    label: "Dies (moulds)",
+    href: "/die",
+    icon: "Tools",
+    matches: ["/die"],
+    group: "make",
+  },
+  {
     id: "collections",
     label: "Collections",
     href: "/collections",

@@ -77,6 +77,7 @@ const routes = [
   "/payments",
   "/fulfilment",
   "/collections",
+  "/die",
   "/tasks",
   "/leads/board",
   "/quotations/review",
