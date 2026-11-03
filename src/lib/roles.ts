@@ -86,6 +86,42 @@ export function canManageTaskOf(actorRole: string, assigneeRole: string): boolea
   return canAssignTo(actorRole, assigneeRole);
 }
 
+// ─── Password strength ────────────────────────────────────────────────
+//
+// The minimum was 4 everywhere, which looked intentional: the column is
+// `pinHash` and there was once a PIN login path, so a 4-digit code on a
+// shared floor terminal made sense. But the username bypass closed in the
+// security review, and a password is now the ONLY factor protecting the
+// account — and an owner or manager can see the cashbook, the payroll and
+// every price, and can create logins.
+//
+// So the floor is raised where it matters and left alone where it does not:
+// full-access accounts need 8, everyone else keeps 4. A supervisor tapping a
+// short code into a machine-side tablet is not the account worth hardening,
+// and raising theirs would push them to write it on the wall.
+
+/** 8 for anyone with unrestricted access, 4 for the rest. */
+export function minPasswordLength(role: string): number {
+  return isFullAccess(role) ? 8 : 4;
+}
+
+/**
+ * Why this password is not acceptable for this role, or null if it is.
+ *
+ * Returns the message rather than throwing, so the same rule can drive the
+ * form's inline validation and the server action's refusal without the
+ * two drifting apart.
+ */
+export function passwordProblem(role: string, password: string): string | null {
+  const min = minPasswordLength(role);
+  if (password.length < min) {
+    return isFullAccess(role)
+      ? `An ${roleLabel(role).toLowerCase()} password must be at least ${min} characters — this account can see the cashbook and payroll and can create logins.`
+      : `Password must be at least ${min} characters.`;
+  }
+  return null;
+}
+
 // ─── Task authorization decisions ─────────────────────────────────────
 //
 // The rules the task server actions enforce, as pure functions. They live

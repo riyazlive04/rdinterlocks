@@ -42,6 +42,9 @@ import {
   canDeleteTask,
   canReassignTask,
   canUpdateTaskStatus,
+  minPasswordLength,
+  passwordProblem,
+  isFullAccess,
   ROLES,
 } from "@/lib/roles";
 
@@ -475,6 +478,43 @@ const taskWrites = tc("TASK-07", "the guarded writes land as decided", async () 
   eq("and it is gone", await prisma.task.count({ where: { id: task.id } }), 0);
 });
 
+// ─────────────────────────── password strength ───────────────────────────
+
+/**
+ * The minimum was 4 for everyone. With the username bypass closed in the
+ * security review, a password is the ONLY factor left — and an owner or
+ * manager can read the cashbook and the payroll and can create logins.
+ */
+const passwordRule = tc("PW-01", "full-access accounts need a longer password", () => {
+  eq("owner needs 8", minPasswordLength("owner"), 8);
+  eq("admin needs 8", minPasswordLength("admin"), 8);
+  eq("manager needs 8", minPasswordLength("manager"), 8);
+  // Deliberately NOT raised: a supervisor taps a short code into a tablet by
+  // the machine, and forcing 8 there pushes it onto a wall.
+  eq("supervisor keeps 4", minPasswordLength("supervisor"), 4);
+  eq("telecaller keeps 4", minPasswordLength("telecaller"), 4);
+  eq("staff keeps 4", minPasswordLength("staff"), 4);
+
+  ok("a 4-character owner password is refused", !!passwordProblem("owner", "1234"));
+  ok("and 7 is still refused", !!passwordProblem("owner", "1234567"));
+  eq("8 is accepted", passwordProblem("owner", "12345678"), null);
+  eq("a 4-character supervisor password is accepted", passwordProblem("supervisor", "1234"), null);
+  ok("but 3 is not, for anyone", !!passwordProblem("supervisor", "123"));
+  ok("nor is empty", !!passwordProblem("telecaller", ""));
+
+  // The refusal has to say why, or it reads as an arbitrary rejection.
+  const why = passwordProblem("manager", "abc");
+  ok("the owner/manager refusal explains itself", !!why && /cashbook|payroll/i.test(why), why ?? "");
+
+  for (const role of ROLES) {
+    eq(
+      `${role}: minimum follows full access`,
+      minPasswordLength(role),
+      isFullAccess(role) ? 8 : 4
+    );
+  }
+});
+
 async function cleanup() {
   await prisma.task.deleteMany({ where: { title: { startsWith: TAG } } });
   const users = await prisma.user.findMany({
@@ -518,6 +558,7 @@ async function cleanup() {
       deletion,
       everyRole,
       taskWrites,
+      passwordRule,
     ]);
   } finally {
     await cleanup();

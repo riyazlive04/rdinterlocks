@@ -49,6 +49,8 @@ start of every session. Update whenever a decision is made.
 | Stock allocation is **derived, never stored** | Phase 8 was planned as a reservation table. Rejected: a stored reservation needs keeping in step with order creation, cancellation, partial dispatch, stage reversal and manual corrections — six writers to one derived number. Recomputing on read holds nothing and cannot drift, and "release on cancellation" and "partial dispatch" stop being rules anyone implements. |
 | Allocation is **advisory, not a lock** | Two people dispatching in the same second can both pass. Accepted for one supervisor and one godown, with bricks physically counted onto the lorry and `remaining` reconcilable afterwards. Revisit if a second godown opens. |
 | Server-action **decisions** live in pure functions | Next.js server actions cannot be driven over HTTP from a script (encrypted action ids, no request context), so the rules were lifted into `decideStageChange` and the `can*Task*` family and the actions now call them. The boundary did not move: roles are still read from the DB inside the action. |
+| Password minimum **8 for full access**, 4 for the rest | A password is the only factor left since the bypass closed, and owner/manager can read the cashbook and payroll and mint logins. Floor-staff codes stay short on purpose. |
+| Settings keeps **9 groups**, not 3 | See the navigation row above — already grouped, owner/manager only, so re-dividing loses information. |
 | Base price matrix = the **0–20 km band** | The owner's rate chart prices by distance and has no factory-gate column. Stated as an assumption; change in Settings → Price matrix if collection differs. |
 
 ## Conventions
@@ -69,7 +71,9 @@ start of every session. Update whenever a decision is made.
   (₹58 / ₹73). The seeded data also has a *300 km & above* band at ₹61 / ₹78
   from the older sheet. Both are live; needs a ruling.
 - **`masonRate` is 0** on all four price rows — the rate chart is sell-side
-  only. Mason payouts compute as zero until filled in.
+  only. Mason payouts compute as zero until filled in. **Now visible rather
+  than silent:** Settings → Price matrix counts the gaps, names the
+  combinations and says what each one breaks. Still needs the figures.
 - **Godown is unpriced.** It is a ConstructionType but absent from the chart,
   so quoting it is refused.
 - **Call recordings** are deferred. The Transcriber sends only a `callId`; the
@@ -78,9 +82,13 @@ start of every session. Update whenever a decision is made.
 - **Lead intake direction.** The webhook contract assumes the provider pushes
   to us. `FACEBOOK_FEED_URL` is a pull relay. If the provider hands over a URL
   for us to call, that is `lib/facebook-feed.ts` plus a scheduled poll instead.
-- **Password minimum is 4** (`pinHash`, with a PIN login path), so short PINs
-  look intentional. With the username bypass closed it is the only factor
-  left; worth raising at least for owner and manager.
+- ~~**Password minimum is 4.**~~ **Resolved:** 8 for owner/admin/manager, 4
+  kept for supervisor/telecaller/staff (a short code tapped into a tablet by
+  the machine is not the account worth hardening, and raising it pushes the
+  code onto a wall). `minPasswordLength` / `passwordProblem` in `lib/roles.ts`
+  drive both the form and the server action. **Login is unchanged**, so
+  existing short passwords keep working — the rule bites on the next change.
+  Forcing a reset is an open question.
 
 ## Known issues
 
@@ -91,9 +99,10 @@ start of every session. Update whenever a decision is made.
   (`migrate diff` checked). **Needs explicit confirmation before pushing.**
 - The branch is **7+ commits ahead of `main` with no upstream** — none of
   this is on GitHub yet.
-- `changePassword` in `settings/actions.ts` changes **the first `role: "admin"`
-  user's** password, not the signed-in user's. A manager changing "their"
-  password edits the owner's row (they must still know the old one, so it is
-  not an escalation), and it throws outright if the owner's role string is
-  `owner` rather than `admin`. Found during this work; **not fixed** —
-  flagged for a decision.
+- ~~`changePassword` changed the wrong user's password.~~ **Fixed:** it
+  loaded `findFirst({ role: "admin" })`, so a manager changing "their"
+  password edited the owner's row (not an escalation — they still needed the
+  owner's current password — but their own password never changed and nothing
+  said so), and it threw "No admin user found" outright if the sole owner's
+  role string was `owner`. Now operates on the session user, re-read from the
+  database.

@@ -7,7 +7,7 @@ import { prisma } from "@/lib/db";
 import { getSession, requireAdmin } from "@/lib/auth";
 import { triggerWaSequencesForStage } from "@/lib/lead-stage";
 import { isValidVpa } from "@/lib/upi-vpa";
-import { ROLES, isFullAccess, isOwner } from "@/lib/roles";
+import { ROLES, isFullAccess, isOwner, passwordProblem } from "@/lib/roles";
 
 // ─── Brick sizes ───────────────────────────────────────────────────────
 
@@ -641,17 +641,38 @@ export async function updateAutomationSettings(data: z.infer<typeof automationSc
 import bcrypt from "bcryptjs";
 const passwordSchema = z.object({
   current: z.string().min(1),
-  next: z.string().min(4),
+  next: z.string().min(1),
 });
+
+/**
+ * Change YOUR OWN password.
+ *
+ * It used to load `findFirst({ where: { role: "admin" } })` and change that
+ * row, which was wrong in two ways. Settings is open to managers, so a
+ * manager changing "their" password was editing the owner's account — not an
+ * escalation, since they still had to know the owner's current password, but
+ * it meant their own password never changed and they had no way to tell. And
+ * if the sole owner's role string was `owner` rather than `admin` the lookup
+ * matched nobody and the page simply threw "No admin user found".
+ *
+ * It now operates on the session user, re-read from the database so the role
+ * driving the length rule is the stored one and never the cookie's.
+ */
 export async function changePassword(data: z.infer<typeof passwordSchema>) {
-  await requireAdmin();
+  const session = await requireAdmin();
   const p = passwordSchema.parse(data);
-  const owner = await prisma.user.findFirst({ where: { role: "admin" } });
-  if (!owner) throw new Error("No admin user found");
-  const ok = await bcrypt.compare(p.current, owner.pinHash);
+  const me = await prisma.user.findUnique({ where: { id: session.userId } });
+  if (!me) throw new Error("Your account no longer exists — sign in again.");
+
+  const ok = await bcrypt.compare(p.current, me.pinHash);
   if (!ok) throw new Error("Current password is incorrect");
+
+  const problem = passwordProblem(me.role, p.next);
+  if (problem) throw new Error(problem);
+  if (p.next === p.current) throw new Error("The new password is the same as the current one.");
+
   await prisma.user.update({
-    where: { id: owner.id },
+    where: { id: me.id },
     data: { pinHash: await bcrypt.hash(p.next, 10) },
   });
 }
@@ -666,7 +687,10 @@ const roleEnum = z.enum(ROLES);
 
 const userCreateSchema = z.object({
   name: z.string().min(1),
-  password: z.string().min(4),
+  // Length is checked against the ROLE below, not here: an owner or manager
+  // password must be 8, a supervisor's 4, and a flat `min` cannot express
+  // that.
+  password: z.string().min(1),
   role: roleEnum.default("manager"),
   permissions: z.array(z.string()).default([]),
 });
@@ -726,6 +750,10 @@ export async function createUser(input: z.infer<typeof userCreateSchema>) {
   const session = await requireAdmin();
   const p = userCreateSchema.parse(input);
   assertMayConferRole(session.role, p.role);
+  // Against the role being GRANTED, so a new owner or manager cannot be
+  // created with a 4-character password.
+  const problem = passwordProblem(p.role, p.password);
+  if (problem) throw new Error(problem);
   await assertNameAvailable(p.name);
   await prisma.user.create({
     data: {
@@ -806,7 +834,15 @@ export async function updateUser(id: string, input: z.infer<typeof userUpdateSch
     permissions: isFullAccess(p.role) ? [] : p.permissions,
     active: p.active,
   };
-  if (p.password && p.password.length >= 4) data.pinHash = await bcrypt.hash(p.password, 10);
+  // A blank field means "leave the password alone". A non-blank one is
+  // checked against the role the user will HOLD after this edit — promoting
+  // a supervisor to manager while leaving their 4-character password would
+  // otherwise slip a weak password onto a full-access account.
+  if (p.password) {
+    const pwProblem = passwordProblem(p.role, p.password);
+    if (pwProblem) throw new Error(pwProblem);
+    data.pinHash = await bcrypt.hash(p.password, 10);
+  }
   await prisma.user.update({ where: { id }, data });
   revalidatePath("/settings/users");
 }

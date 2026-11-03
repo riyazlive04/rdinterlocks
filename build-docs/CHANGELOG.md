@@ -217,3 +217,34 @@ run against a throwaway Postgres and again from an empty database.
 schema to production and then run `prisma/seed.ts`, which truncates 34 tables.
 `scripts/guard-local-db.mjs` now requires both urls to be local and fronts
 `npm run test:seed`.
+
+### Open questions resolved, and one bug found on the way
+Three of the items waiting on a decision could be settled without one.
+
+- **`changePassword` changed the wrong user's password.** It loaded
+  `findFirst({ where: { role: "admin" } })` and edited that row. So a manager
+  changing "their" password was editing the owner's account — not an
+  escalation, since they still had to know the owner's current password, but
+  their own password never changed and nothing on screen said so. And if the
+  sole owner's role string was `owner` rather than `admin`, the lookup matched
+  nobody and the page threw "No admin user found". Now operates on the session
+  user, re-read from the database. Found while raising the minimum, not
+  reported by anyone.
+- **Password minimum raised to 8 for owner/admin/manager**, kept at 4 for
+  supervisor/telecaller/staff. A password is the only factor left since the
+  username bypass closed, and a full-access account can read the cashbook and
+  payroll and create logins — but a supervisor tapping a short code into a
+  tablet beside the machine is not the account worth hardening, and forcing 8
+  there puts it on a wall. `minPasswordLength` / `passwordProblem` in
+  `lib/roles.ts` drive the forms and the server actions from one rule, checked
+  against the role being *granted*, so promoting a supervisor to manager
+  cannot carry a 4-character password onto a full-access account.
+  **Login is unchanged** — existing short passwords keep working and the rule
+  bites on the next change. Whether to force a reset is still open.
+- **`masonRate` = 0 is now visible instead of silent.** Settings → Price
+  matrix counts the priced combinations missing a mason rate or production
+  cost, names them, and says what each gap breaks (zero payouts; margin
+  reading as the full sell price). The figures themselves still have to come
+  from the owner.
+
+Tests: `PW-01` in run-actions.ts. 154/154.

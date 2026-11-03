@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Button, Card, Field, Input, Select, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { DEFAULT_AREAS_BY_ROLE } from "@/lib/access";
-import { ROLES, isFullAccess, roleLabel, type Role } from "@/lib/roles";
+import { ROLES, isFullAccess, minPasswordLength, passwordProblem, roleLabel, type Role } from "@/lib/roles";
 
 type Area = { key: string; label: string };
 type User = {
@@ -109,8 +109,13 @@ export function UsersManager({
   const save = () => {
     setError(null);
     if (!name.trim()) return setError("Name is required");
-    if (editing === "new" && password.length < 4)
-      return setError("Set a password (min 4 characters)");
+    // Same rule as the server action, from the same function, so the inline
+    // message and the refusal can never drift apart. Checked against the
+    // role being granted: an owner or manager needs 8, others 4.
+    if (editing === "new" || password) {
+      const problem = passwordProblem(role, password);
+      if (problem) return setError(problem);
+    }
     // A full-access role never stores per-area grants (isAdmin short-circuits
     // can()), so don't carry the previous role's areas across with it — e.g.
     // promoting a telecaller to manager would otherwise file their old leads
@@ -170,7 +175,11 @@ export function UsersManager({
             type="text"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={editing === "new" ? "min 4 characters" : "unchanged"}
+            placeholder={
+              editing === "new"
+                ? `min ${minPasswordLength(role)} characters`
+                : `unchanged — or type a new one (min ${minPasswordLength(role)})`
+            }
           />
         </Field>
         <Field

@@ -1,11 +1,15 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Button, Card, Field, Input } from "@/components/ui";
+import { minPasswordLength, passwordProblem } from "@/lib/roles";
 
 export function SecurityForm({
   onSave,
+  role,
 }: {
   onSave: (d: { current: string; next: string }) => Promise<void>;
+  /** The signed-in user's role — it sets the minimum length. */
+  role: string;
 }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -18,7 +22,10 @@ export function SecurityForm({
     setError(null);
     setSaved(false);
     if (!current) return setError("Enter current password");
-    if (next.length < 4) return setError("New password must be at least 4 characters");
+    // The same rule the server action enforces, from the same function.
+    const problem = passwordProblem(role, next);
+    if (problem) return setError(problem);
+    if (next === current) return setError("The new password is the same as the current one");
     if (next !== confirm) return setError("Passwords don't match");
     startTransition(async () => {
       try {
@@ -39,7 +46,10 @@ export function SecurityForm({
         <Field label="Current password">
           <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoFocus />
         </Field>
-        <Field label="New password">
+        <Field
+          label="New password"
+          hint={`At least ${minPasswordLength(role)} characters.`}
+        >
           <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         <Field label="Confirm new password">
