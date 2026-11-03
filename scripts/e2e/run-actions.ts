@@ -38,7 +38,19 @@ import {
   type FulfilmentStage,
 } from "../../src/app/(app)/fulfilment/stage";
 import {
+  TASK_PRIORITIES,
+  compareTasks,
+  isOverdue,
+  isTaskActive,
+  isTaskDone,
+  nextTaskStatus,
+  normalizePriority,
+  normalizeTaskStatus,
+  priorityRank,
+} from "../../src/app/(app)/tasks/task-meta";
+import {
   canCreateTaskFor,
+  decideTaskStatusChange,
   canDeleteTask,
   canReassignTask,
   canUpdateTaskStatus,
@@ -515,6 +527,296 @@ const passwordRule = tc("PW-01", "full-access accounts need a longer password", 
   }
 });
 
+
+// ──────────────────────── priority and progress ──────────────────────────
+
+/** AC TASK-09: an unknown priority normalizes rather than vanishing. */
+const priorityValues = tc("TASK-09", "priority normalizes and ranks", () => {
+  for (const p of TASK_PRIORITIES) {
+    eq(`${p} round-trips`, normalizePriority(p), p);
+  }
+  eq("unknown -> normal", normalizePriority("screaming"), "normal");
+  eq("empty -> normal", normalizePriority(""), "normal");
+  eq("null -> normal", normalizePriority(null), "normal");
+  eq("undefined -> normal", normalizePriority(undefined), "normal");
+
+  // Rank is the sort order, so urgent must be lowest.
+  ok("urgent outranks high", priorityRank("urgent") < priorityRank("high"));
+  ok("high outranks normal", priorityRank("high") < priorityRank("normal"));
+  ok("normal outranks low", priorityRank("normal") < priorityRank("low"));
+  eq("an unknown value sorts as normal", priorityRank("nonsense"), priorityRank("normal"));
+  eq("there are four levels", TASK_PRIORITIES.length, 4);
+});
+
+/**
+ * AC TASK-11: anything that is not `done` is active.
+ *
+ * The live database defaults Task.status to "wip", a value predating the
+ * schema. Writing this check as "is open" instead of "is not done" is exactly
+ * what hid those rows from all three dashboards.
+ */
+const statusValues = tc("TASK-11", "a legacy wip row counts as active", () => {
+  ok("open is active", isTaskActive("open"));
+  ok("wip is active", isTaskActive("wip"));
+  ok("an unknown value is active", isTaskActive("parked_2019"));
+  ok("done is not", !isTaskActive("done"));
+  ok("only done is done", isTaskDone("done") && !isTaskDone("wip") && !isTaskDone("open"));
+
+  eq("wip is a first-class status", normalizeTaskStatus("wip"), "wip");
+  eq("unknown displays as open", normalizeTaskStatus("parked_2019"), "open");
+  eq("null displays as open", normalizeTaskStatus(null), "open");
+
+  // The one-tap cycle.
+  eq("open -> wip", nextTaskStatus("open"), "wip");
+  eq("wip -> done", nextTaskStatus("wip"), "done");
+  eq("done -> open (reopen)", nextTaskStatus("done"), "open");
+  eq("a legacy value starts", nextTaskStatus("parked_2019"), "wip");
+});
+
+/** AC TASK-10: overdue, then priority, then due date. */
+const ordering = tc("TASK-10", "overdue outranks urgent, which outranks the due date", () => {
+  const today = "2026-06-15";
+  const t = (priority: string, dueDate: string | null, status = "open") => ({
+    status,
+    priority,
+    dueDate,
+  });
+
+  // Overdue beats a higher priority that is not yet late. Stated because it
+  // is a judgement: a missed deadline is already a failure.
+  const lateLow = t("low", "2026-06-01");
+  const urgentSoon = t("urgent", "2026-06-20");
+  ok("the late low-priority task is overdue", isOverdue(lateLow, today));
+  ok("the urgent one is not", !isOverdue(urgentSoon, today));
+  ok("so the late one sorts first", compareTasks(lateLow, urgentSoon, today) < 0);
+
+  // Within the same overdue-ness, priority decides.
+  ok(
+    "urgent before normal",
+    compareTasks(t("urgent", "2026-06-30"), t("normal", "2026-06-20"), today) < 0
+  );
+  ok(
+    "high before low",
+    compareTasks(t("high", null), t("low", null), today) < 0
+  );
+
+  // Within the same priority, the earlier due date.
+  ok(
+    "earlier due date first",
+    compareTasks(t("normal", "2026-06-18"), t("normal", "2026-06-25"), today) < 0
+  );
+  // An undated task is not more urgent than a dated one.
+  ok("dated before undated", compareTasks(t("normal", "2026-06-25"), t("normal", null), today) < 0);
+  eq("two identical tasks tie", compareTasks(t("normal", null), t("normal", null), today), 0);
+
+  // A done task is never overdue, however old.
+  ok("a completed task is not overdue", !isOverdue(t("low", "2020-01-01", "done"), today));
+
+  // And the whole list sorts as documented.
+  const list = [
+    t("low", "2026-06-25"),
+    t("urgent", "2026-06-30"),
+    t("normal", "2026-06-01"),
+    t("high", null),
+  ];
+  const sorted = [...list].sort((a, b) => compareTasks(a, b, today));
+  eq("overdue normal leads", sorted[0].priority, "normal");
+  eq("then urgent", sorted[1].priority, "urgent");
+  eq("then high", sorted[2].priority, "high");
+  eq("then low", sorted[3].priority, "low");
+});
+
+/** AC TASK-12 / TASK-13: what a status change does to the timestamps. */
+const statusTransitions = tc("TASK-12", "status changes keep the timestamps honest", () => {
+  const now = new Date("2026-06-15T10:00:00Z");
+  const started = new Date("2026-06-10T08:00:00Z");
+  const sup = { userId: "u-sup", role: "supervisor" };
+  const subject = (status: string, startedAt: Date | null = null) => ({
+    assignedToId: sup.userId,
+    createdById: "u-manager",
+    assigneeRole: "supervisor",
+    status,
+    startedAt,
+  });
+
+  // open -> wip records the start.
+  const start = decideTaskStatusChange(sup, subject("open"), "wip", now);
+  ok("starting is allowed", start.allowed);
+  if (start.allowed) {
+    eq("startedAt is set", start.startedAt?.getTime(), now.getTime());
+    eq("completedAt is cleared", start.completedAt, null);
+  }
+
+  // Restarting a reopened task must NOT lose the original start.
+  const restart = decideTaskStatusChange(sup, subject("open", started), "wip", now);
+  ok("restart allowed", restart.allowed);
+  if (restart.allowed) {
+    eq("the original start is kept", restart.startedAt?.getTime(), started.getTime());
+  }
+
+  // -> done records completion.
+  const finish = decideTaskStatusChange(sup, subject("wip", started), "done", now);
+  ok("finishing is allowed", finish.allowed);
+  if (finish.allowed) {
+    eq("completedAt is set", finish.completedAt?.getTime(), now.getTime());
+    eq("startedAt is untouched", finish.startedAt, undefined);
+    ok("the reason is left alone", !finish.clearStatusReason);
+  }
+
+  // A short job may skip wip entirely.
+  const quick = decideTaskStatusChange(sup, subject("open"), "done", now);
+  ok("open -> done is allowed (no one-step rule here)", quick.allowed);
+
+  // Reopening clears completion AND the stale reason, but keeps the start.
+  const reopen = decideTaskStatusChange(sup, subject("done", started), "open", now);
+  ok("reopening is allowed", reopen.allowed);
+  if (reopen.allowed) {
+    eq("completedAt is cleared", reopen.completedAt, null);
+    ok("the stale reason is cleared", reopen.clearStatusReason === true);
+    eq("but startedAt is kept", reopen.startedAt, undefined);
+  }
+
+  // AC TASK-13: a double-tap writes nothing.
+  for (const status of ["open", "wip", "done"]) {
+    const same = decideTaskStatusChange(sup, subject(status), status, now);
+    ok(`${status} -> ${status} is allowed`, same.allowed);
+    ok(`${status} -> ${status} is a no-op`, same.allowed && same.noop);
+  }
+
+  // An invented status is refused.
+  const bogus = decideTaskStatusChange(sup, subject("open"), "cancelled", now);
+  eq("an unknown target status is refused", bogus.allowed, false);
+  ok(
+    "and says so",
+    !bogus.allowed && /not a task status/i.test(bogus.reason),
+    !bogus.allowed ? bogus.reason : ""
+  );
+});
+
+/** AC TASK-14: the permission on a status change is the phase 4 rule. */
+const statusPermission = tc("TASK-14", "only the assignee or a senior moves a task", () => {
+  const now = new Date("2026-06-15T10:00:00Z");
+  const task = {
+    assignedToId: "u-tele",
+    createdById: "u-manager",
+    assigneeRole: "telecaller",
+    status: "open",
+    startedAt: null,
+  };
+
+  ok(
+    "the assignee may start it",
+    decideTaskStatusChange({ userId: "u-tele", role: "telecaller" }, task, "wip", now).allowed
+  );
+  ok(
+    "their manager may",
+    decideTaskStatusChange({ userId: "u-manager", role: "manager" }, task, "wip", now).allowed
+  );
+  // A peer may not — the chain never runs sideways.
+  const peer = decideTaskStatusChange(
+    { userId: "u-other-tele", role: "telecaller" },
+    task,
+    "wip",
+    now
+  );
+  eq("a peer may not", peer.allowed, false);
+  ok(
+    "and gets the phase 4 message",
+    !peer.allowed && /your own tasks, or your team/i.test(peer.reason),
+    !peer.allowed ? peer.reason : ""
+  );
+  // Rank is checked BEFORE the target status, so a peer passing nonsense
+  // still gets the permission error rather than leaking that the status was
+  // the problem.
+  eq(
+    "a peer with a bogus status is still refused",
+    decideTaskStatusChange({ userId: "u-other", role: "telecaller" }, task, "wip", now).allowed,
+    false
+  );
+});
+
+/** AC TASK-15: the dashboards' filter now counts wip as open. */
+const dashboardCounts = tc("TASK-15", "a wip task counts as open everywhere", async () => {
+  const mk = (role: string) =>
+    prisma.user.create({
+      data: { name: uniq(), pinHash: "x", role, permissions: [], active: true },
+    });
+  const sup = await mk("supervisor");
+  const manager = await mk("manager");
+
+  const yesterday = new Date(Date.now() - 86400000);
+  await prisma.task.create({
+    data: {
+      title: `${TAG} wip and overdue`,
+      assignedToId: sup.id,
+      createdById: manager.id,
+      status: "wip",
+      priority: "urgent",
+      dueDate: yesterday,
+      startedAt: yesterday,
+    },
+  });
+  await prisma.task.create({
+    data: {
+      title: `${TAG} plain open`,
+      assignedToId: sup.id,
+      createdById: manager.id,
+      status: "open",
+      dueDate: yesterday,
+    },
+  });
+  await prisma.task.create({
+    data: {
+      title: `${TAG} finished`,
+      assignedToId: sup.id,
+      createdById: manager.id,
+      status: "done",
+      completedAt: new Date(),
+      dueDate: yesterday,
+    },
+  });
+
+  // The OLD filter, kept here to show what it missed.
+  const oldWay = await prisma.task.count({
+    where: { assignedToId: sup.id, status: "open" },
+  });
+  const newWay = await prisma.task.count({
+    where: { assignedToId: sup.id, status: { not: "done" } },
+  });
+  eq("the old `status: open` filter saw only one", oldWay, 1);
+  eq("the new one sees both live tasks", newWay, 2);
+  ok("so the wip task was being hidden", newWay > oldWay);
+
+  // The overdue count the owner dashboard shows.
+  const overdueNow = await prisma.task.count({
+    where: { assignedToId: sup.id, status: { not: "done" }, dueDate: { lt: new Date() } },
+  });
+  eq("both overdue live tasks are counted", overdueNow, 2);
+
+  // And priority persisted.
+  const urgent = await prisma.task.findFirst({
+    where: { title: { startsWith: TAG }, priority: "urgent" },
+  });
+  ok("the urgent task is stored as urgent", !!urgent);
+  eq("with its start time", urgent?.startedAt?.toDateString(), yesterday.toDateString());
+});
+
+/** AC TASK-08: delegation itself is untouched by any of this. */
+const delegationUnchanged = tc("TASK-08", "delegation still runs strictly downward", () => {
+  // A deliberate duplicate of TASK-01's core, as a regression pin: priority
+  // and progress must not have widened who may assign to whom.
+  ok("owner -> manager", canCreateTaskFor("owner", { role: "manager", active: true }).allowed);
+  ok("manager !-> owner", !canCreateTaskFor("manager", { role: "owner", active: true }).allowed);
+  ok(
+    "no peers",
+    !canCreateTaskFor("supervisor", { role: "supervisor", active: true }).allowed
+  );
+  ok(
+    "a telecaller delegates to nobody",
+    !canCreateTaskFor("telecaller", { role: "staff", active: true }).allowed
+  );
+});
+
 async function cleanup() {
   await prisma.task.deleteMany({ where: { title: { startsWith: TAG } } });
   const users = await prisma.user.findMany({
@@ -558,6 +860,13 @@ async function cleanup() {
       deletion,
       everyRole,
       taskWrites,
+      delegationUnchanged,
+      priorityValues,
+      statusValues,
+      ordering,
+      statusTransitions,
+      statusPermission,
+      dashboardCounts,
       passwordRule,
     ]);
   } finally {

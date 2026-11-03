@@ -144,12 +144,15 @@ export default async function OwnerPanel({ session }: { session: Session }) {
       include: { user: { select: { id: true, name: true, role: true } } },
     }),
     prisma.task.findMany({
-      where: { status: "open", dueDate: { lt: today } },
+      // "not done", not "is open": the live database defaults Task.status to
+      // `wip`, so filtering on "open" exactly hid every in-progress task
+      // from this panel while the tasks page listed it.
+      where: { status: { not: "done" }, dueDate: { lt: today } },
       orderBy: { dueDate: "asc" },
       take: 5,
       include: { assignedTo: { select: { name: true } } },
     }),
-    prisma.task.count({ where: { status: "open", dueDate: { lt: today } } }),
+    prisma.task.count({ where: { status: { not: "done" }, dueDate: { lt: today } } }),
   ]);
 
   const cashIn = cashEntries.filter((e) => e.direction === "in").reduce((s, e) => s + e.amount, 0);

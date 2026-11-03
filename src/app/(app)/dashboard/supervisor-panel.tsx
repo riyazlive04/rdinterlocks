@@ -69,7 +69,10 @@ export default async function SupervisorPanel({ session }: { session: Session })
       _sum: { brickCount: true, damagedCount: true, cementBagsUsed: true, totalWage: true },
     }),
     prisma.task.findMany({
-      where: { assignedToId: session.userId, status: "open" },
+      // "not done", not "is open": the live database defaults Task.status to
+      // `wip`, so filtering on "open" exactly hid every in-progress task
+      // from this panel while the tasks page listed it.
+      where: { assignedToId: session.userId, status: { not: "done" } },
       // Dated tasks first and earliest-due at the top; undated ones trail.
       orderBy: [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
       take: 8,

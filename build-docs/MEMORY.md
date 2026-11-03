@@ -59,6 +59,10 @@ start of every session. Update whenever a decision is made.
 | Zone renames happen **in place** (`ZoneDef.renameFrom`) | The seeder upserts on `name`, so renaming a zone would create a second row and orphan the first — still holding its ZonePrices and still offered in the dropdown. Two plausible zones for one place is worse on a priced document than a stale name. RATE-07 asserts no rename target collides with a live name. |
 | The rate chart is transcribed **twice** | Once as `prisma/delivery-zone-defs.ts`, once in `scripts/e2e/run-pricing.ts`, read off the PDF independently, and compared cell by cell. A mistyped digit fails nothing on its own — it quotes a plausible wrong price that is only found after the customer has the document. One copy proves nothing. |
 | **Karnataka = customer's own transport** (assumption) | The 2026-11-03 sheet adds "Karnataka (Transport own)" at ₹44/₹54. Read as the customer arranging their own lorry, because ₹44/₹54 sits just under the 0-20 km band and far below 300 km+ (₹61/₹78) — only possible if no delivery is being paid for. **If it means RD sends its own vehicle, the row is wrong and the price is far too low.** Flagged to the owner, not silently assumed. |
+| Task progress is `open | wip | done`, and `wip` is **reconciliation** | The live database still defaults `Task.status` to `"wip"`, a value predating the schema. The tasks page treated it as not-done and showed it; **all three dashboards filtered `status: "open"` exactly and hid it.** Making it first-class fixed that split. Every count now asks "not done", never "is open". |
+| Task status has **no one-step rule**, unlike fulfilment stages | The stage rule exists because an order marked `dispatched` that was never made reads as sent and is only found when the customer rings. A task marked done that is not done is visible to whoever assigned it, so the ceremony would buy nothing and would block the common case of a five-minute job that never "starts". |
+| **The assignee may change priority**, not just the delegator | They are usually the person who discovers something is urgent, and a senior can always correct it. Same permission as changing status (`canUpdateTaskStatus`). |
+| Overdue outranks **urgent** in the task sort | A missed deadline is already a failure; an urgent task due next week is not yet one. |
 | Base price matrix = the **0–20 km band** | The owner's rate chart prices by distance and has no factory-gate column. Stated as an assumption; change in Settings → Price matrix if collection differs. |
 
 ## Conventions
@@ -112,6 +116,9 @@ start of every session. Update whenever a decision is made.
 ## Known issues
 
 - 16 ESLint warnings, all pre-existing unused imports.
+- **`Task.priority` and `Task.startedAt` are on the throwaway test database
+  only** (two additive columns + one index; `migrate diff` showed no `DROP`).
+  Production lacks them, so `/tasks` will error there until pushed.
 - **The 2026-11-03 rate chart has been applied to the throwaway test database
   only.** Production still has the old zones, so Dindigul still quotes at the
   110-160 km rate there and Karnataka is unquotable. Run

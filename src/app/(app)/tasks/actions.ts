@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { TASK_PRIORITIES, normalizePriority } from "./task-meta";
 import { requireSession } from "@/lib/auth";
 import {
   canCreateTaskFor,
   canDeleteTask,
   canReassignTask,
   canUpdateTaskStatus,
+  decideTaskStatusChange,
 } from "@/lib/roles";
 
 // ─── The one rule every action below shares ────────────────────────────
@@ -50,6 +52,9 @@ const createSchema = z.object({
   details: z.string().optional(),
   assignedToId: z.string().min(1),
   dueDate: z.string().optional(),
+  // Defaulted rather than required: the form offers it, but a task raised in
+  // a hurry should not be blocked on choosing one.
+  priority: z.enum(TASK_PRIORITIES).default("normal"),
 });
 
 /**
@@ -60,7 +65,7 @@ const createSchema = z.object({
  * hand it to THIS person — checked against the role loaded from the DB a few
  * lines down, which is the security boundary for the whole feature.
  */
-export async function createTask(input: z.infer<typeof createSchema>) {
+export async function createTask(input: z.input<typeof createSchema>) {
   const session = await requireSession();
   const p = createSchema.parse(input);
 
@@ -80,6 +85,7 @@ export async function createTask(input: z.infer<typeof createSchema>) {
       assignedToId: assignee.id,
       createdById: session.userId,
       dueDate: p.dueDate ? new Date(p.dueDate) : null,
+      priority: p.priority,
     },
   });
   revalidatePath("/tasks");
@@ -93,7 +99,50 @@ export async function createTask(input: z.infer<typeof createSchema>) {
  * stored role. A telecaller therefore completes their own task and nothing
  * else — not even another telecaller's, since the chain never runs sideways.
  */
-export async function setTaskStatus(id: string, done: boolean) {
+export async function setTaskStatus(id: string, status: string) {
+  const session = await requireSession();
+  const task = await loadTaskWithAssignee(id);
+
+  // The rule — who may move it, and what that does to startedAt /
+  // completedAt / statusReason — lives in lib/roles.ts so it can be tested
+  // without a request context. This function authenticates and writes.
+  const decision = decideTaskStatusChange(
+    session,
+    {
+      assignedToId: task.assignedToId,
+      createdById: task.createdById,
+      assigneeRole: task.assignedTo.role,
+      status: task.status,
+      startedAt: task.startedAt,
+    },
+    status
+  );
+  if (!decision.allowed) throw new Error(decision.reason);
+  // A double-tap. Skipping the write keeps startedAt and completedAt honest.
+  if (decision.noop) return;
+
+  await prisma.task.update({
+    where: { id },
+    data: {
+      status,
+      ...(decision.startedAt !== undefined ? { startedAt: decision.startedAt } : {}),
+      ...(decision.completedAt !== undefined ? { completedAt: decision.completedAt } : {}),
+      ...(decision.clearStatusReason ? { statusReason: null } : {}),
+    },
+  });
+  revalidatePath("/tasks");
+  revalidatePath("/");
+}
+
+/**
+ * Change how urgent a task is.
+ *
+ * Same permission as the status: the assignee or someone above them. The
+ * assignee is usually the person who finds out that something is urgent, and
+ * a senior can always correct it — so locking this to whoever delegated the
+ * task would cost more than it protects.
+ */
+export async function setTaskPriority(id: string, priority: string) {
   const session = await requireSession();
   const task = await loadTaskWithAssignee(id);
 
@@ -104,17 +153,14 @@ export async function setTaskStatus(id: string, done: boolean) {
   });
   if (!decision.allowed) throw new Error(decision.reason);
 
-  await prisma.task.update({
-    where: { id },
-    data: {
-      status: done ? "done" : "open",
-      completedAt: done ? new Date() : null,
-      // Reopening drops the old explanation. A stale "waiting for cement" on
-      // a task that is moving again is worse than no note at all.
-      statusReason: done ? task.statusReason : null,
-    },
-  });
+  // Parsed, not trusted: an unrecognised value would sort as `normal`
+  // everywhere but still read as a real setting on the row.
+  const next = z.enum(TASK_PRIORITIES).parse(priority);
+  if (normalizePriority(task.priority) === next) return;
+
+  await prisma.task.update({ where: { id }, data: { priority: next } });
   revalidatePath("/tasks");
+  revalidatePath("/");
 }
 
 const reasonSchema = z.string().max(300);

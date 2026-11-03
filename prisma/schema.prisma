@@ -129,8 +129,20 @@ model Task {
   // this schema was reconciled to the database rather than the reverse.
   statusReason String?
 
+  /// urgent | high | normal | low. A String like every other enum-ish column
+  /// here; normalizePriority() in app/(app)/tasks/task-meta.ts maps anything
+  /// unexpected to `normal` rather than letting the row disappear.
+  priority     String    @default("normal")
+
+  /// When work actually began — set the first time the task moves to `wip`,
+  /// and KEPT if it is later reopened, so the original start is not lost.
+  /// Null means nobody has picked it up yet, which is the thing a delegator
+  /// could not previously tell apart from "in progress".
+  startedAt    DateTime?
+
   @@index([assignedToId])
   @@index([status])
+  @@index([priority])
 }
 
 // ─── Master data (admin-managed) ──────────────────────────────────────

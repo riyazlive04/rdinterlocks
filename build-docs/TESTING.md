@@ -59,7 +59,7 @@ All figures below are from a real run against a throwaway Postgres on
 | `run-offline.ts` | Lead normalisation, webhook signing, pure logic | **128/128** |
 | `run-pricing.ts` | The rate chart, transcribed twice and compared | **226/226** |
 | `run-rbac.ts` | RBAC, duty, payment gate, security fixes | **52/52** |
-| `run-actions.ts` | Stage transitions, task delegation, password rule | **154/154** |
+| `run-actions.ts` | Stage transitions, task delegation, priority & progress, password rule | **229/229** |
 | `run-collections.ts` | Outstanding balance and ageing (phase 7) | **73/73** |
 | `run-allocation.ts` | Godown stock allocation (phase 8) | **51/51** |
 | `run-die.ts` | Die register: lifecycle, money unwind, three gates | **46/46** |
@@ -69,7 +69,7 @@ All figures below are from a real run against a throwaway Postgres on
 | `probe-routes.mjs` | All 63 routes, authenticated as owner | all 200 |
 | `npm run build` | Production build | clean |
 
-**980 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
+**1,055 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
 all pre-existing unused imports.
 
 ### Notable cases
@@ -91,6 +91,9 @@ all pre-existing unused imports.
 | `RATE-01` | The rate chart is written out **twice** — once as the app's data, once in the suite, read off the PDF independently — and the two are compared cell by cell. One copy proves nothing; a mistyped digit does not fail anything on its own, it just quotes the wrong price. |
 | `RATE-03` | Dindigul is in the 160-300 km band, pinned by name because that is the error the new sheet caught: it had been transcribed into 110-160, a ₹3/brick under-quote. |
 | `RATE-08` | Every one of the 9 bands is priced **through `resolveQuotationItems`**, not just checked as data — the path a telecaller actually takes. |
+| `TASK-11` | A legacy `wip` row counts as active. Written as "not done" rather than "is open", which is exactly the mistake that hid those rows from all three dashboards. |
+| `TASK-15` | Runs the **old** `status: "open"` filter alongside the new one and asserts the old one saw fewer tasks — the bug is demonstrated, not just fixed. |
+| `TASK-08` | A deliberate duplicate of TASK-01's core, as a regression pin that priority and progress did not widen who may assign to whom. |
 
 ### Fixed on this branch
 

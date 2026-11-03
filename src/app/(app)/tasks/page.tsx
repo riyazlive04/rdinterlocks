@@ -9,9 +9,11 @@ import {
   createTask,
   deleteTask,
   reassignTask,
+  setTaskPriority,
   setTaskStatus,
   setTaskStatusReason,
 } from "./actions";
+import { compareTasks, isTaskActive, isOverdue, normalizePriority } from "./task-meta";
 
 export default async function TasksPage() {
   const session = await requireSession();
@@ -23,9 +25,10 @@ export default async function TasksPage() {
   const delegates = canDelegate(session.role);
   const teamRoles = assignableRoles(session.role);
 
-  // "open" before "done", then soonest due date first. Overdue is pulled to
-  // the top of each section afterwards, once we know today's date.
-  const order = [{ status: "asc" as const }, { dueDate: "asc" as const }, { createdAt: "desc" as const }];
+  // A stable base order from the database; compareTasks() below decides the
+  // order actually rendered (overdue, then priority, then due date), because
+  // priority rank is not alphabetical and cannot be expressed in SQL here.
+  const order = [{ dueDate: "asc" as const }, { createdAt: "desc" as const }];
   const include = { assignedTo: true, createdBy: true };
 
   const [mineRaw, byMeRaw, teamRaw, assignable] = await Promise.all([
@@ -75,6 +78,8 @@ export default async function TasksPage() {
     status: string;
     statusReason: string | null;
     dueDate: Date | null;
+    priority: string;
+    startedAt: Date | null;
     assignedToId: string;
     createdById: string | null;
     assignedTo?: { name: string; role: string } | null;
@@ -91,6 +96,8 @@ export default async function TasksPage() {
       status: t.status,
       statusReason: t.statusReason,
       dueDate: t.dueDate ? formatISODate(t.dueDate) : null,
+      priority: normalizePriority(t.priority),
+      startedAt: t.startedAt ? formatISODate(t.startedAt) : null,
       assignedToName: t.assignedTo?.name ?? "-",
       assigneeRoleLabel: roleLabel(assigneeRole),
       createdByName: t.createdBy?.name ?? null,
@@ -104,20 +111,26 @@ export default async function TasksPage() {
     };
   };
 
-  // Overdue first within a section, then whatever order the DB gave us.
-  const overdue = (t: TaskDTO) => t.status !== "done" && !!t.dueDate && t.dueDate < today;
-  const overdueFirst = (rows: TaskDTO[]) =>
-    [...rows].sort((a, b) => Number(overdue(b)) - Number(overdue(a)));
+  // Overdue, then priority, then due date — see task-meta.ts for why overdue
+  // outranks urgent.
+  const sorted = (rows: TaskDTO[]) => [...rows].sort((a, b) => compareTasks(a, b, today));
+  const overdue = (t: TaskDTO) => isOverdue(t, today);
 
-  const myTasks = overdueFirst(mineRaw.map(toDTO));
-  const byMeTasks = overdueFirst(byMeRaw.map(toDTO));
-  const teamTasks = overdueFirst(teamRaw.map(toDTO));
+  const myTasks = sorted(mineRaw.map(toDTO));
+  const byMeTasks = sorted(byMeRaw.map(toDTO));
+  const teamTasks = sorted(teamRaw.map(toDTO));
 
-  const openCount = (rows: TaskDTO[]) => rows.filter((t) => t.status !== "done").length;
+  // "Not done", never "is open" — the live database defaults this column to
+  // `wip`, so counting only "open" is what hid those rows from every
+  // dashboard.
+  const openCount = (rows: TaskDTO[]) => rows.filter((t) => isTaskActive(t.status)).length;
   const overdueCount = (rows: TaskDTO[]) => rows.filter(overdue).length;
+  const urgentCount = (rows: TaskDTO[]) =>
+    rows.filter((t) => isTaskActive(t.status) && t.priority === "urgent").length;
 
   const myOpen = openCount(myTasks);
   const myOverdue = overdueCount(myTasks);
+  const myUrgent = urgentCount(myTasks);
   const teamOpen = openCount(teamTasks);
   const teamOverdue = overdueCount(teamTasks);
 
@@ -145,8 +158,14 @@ export default async function TasksPage() {
         <StatCard
           label="My overdue"
           value={formatNumber(myOverdue)}
-          sub={myOverdue > 0 ? "Past the due date" : "Nothing late"}
-          tone={myOverdue > 0 ? "red" : "default"}
+          sub={
+            myUrgent > 0
+              ? `${formatNumber(myUrgent)} urgent waiting`
+              : myOverdue > 0
+                ? "Past the due date"
+                : "Nothing late"
+          }
+          tone={myOverdue > 0 || myUrgent > 0 ? "red" : "default"}
         />
         {delegates && (
           <>
@@ -180,9 +199,13 @@ export default async function TasksPage() {
           "use server";
           await createTask(d);
         }}
-        onToggle={async (id, done) => {
+        onSetStatus={async (id, status) => {
           "use server";
-          await setTaskStatus(id, done);
+          await setTaskStatus(id, status);
+        }}
+        onSetPriority={async (id, priority) => {
+          "use server";
+          await setTaskPriority(id, priority);
         }}
         onReassign={async (id, userId) => {
           "use server";

@@ -371,3 +371,46 @@ instruction not to move to production yet.
 
 Tests: scripts/e2e/run-pricing.ts, 226/226. npm test: 980 assertions, 0
 failures, exit 0.
+
+### Task priority and progress — phase 12
+**Tasks were already assignable, and that was verified before anything
+changed.** Work travels strictly down the chain with reassignment, completion,
+a parked reason, deletion and three views. Confirmed live over HTTP as each
+role: an owner is offered managers, a manager is not offered an owner, a
+telecaller is offered nobody and gets no create form.
+
+What a task could not say was how urgent it is, or whether anyone had started.
+
+- **Priority** — urgent / high / normal / low, default normal, with the
+  consequence spelled out in the dropdown ("Drop everything — production is
+  stopped"). Settable by the assignee **or** a senior: the assignee is usually
+  the person who discovers something is urgent, and a senior can correct it.
+- **Progress** — `open → wip → done`, with `startedAt`, so "nobody has picked
+  this up" is finally distinguishable from "in progress". One tap walks a row
+  forward; a half-filled box means started.
+- **Sort** — overdue, then priority, then due date. Overdue outranks urgent
+  deliberately: a missed deadline is already a failure.
+- **Filter** — Everything / Urgent only / Overdue / Not started.
+
+**A live bug fixed on the way.** `wip` is not a new invention — the production
+database still defaults `Task.status` to it, a value predating the schema. The
+tasks page treated those rows as not-done and listed them, while **all three
+dashboards filtered `status: "open"` exactly and hid them**. So an in-progress
+task was invisible on every dashboard. All four queries now ask
+`status: { not: "done" }`, which raises the open and overdue counts on the
+owner, supervisor and telecaller panels. TASK-15 runs the old filter beside the
+new one and asserts the old one saw fewer, so the bug is demonstrated rather
+than just corrected.
+
+Deliberately **no one-step-at-a-time rule** here, unlike the fulfilment stages:
+that rule exists because an order marked dispatched that was never made reads
+as sent to the office, whereas a task marked done is visible to whoever
+assigned it. A five-minute job can go straight to done.
+
+Schema: `priority` and `startedAt` plus one index — additive, `migrate diff`
+showed no `DROP`. **Applied to the throwaway test database only.**
+
+Tests: run-actions.ts 154 → **229/229**. npm test: 1,055 assertions, 0
+failures, exit 0. Caught one real defect during the live check: a non-function
+export (`TASK_STATUS_VALUES`) in a `"use server"` file 500'd the whole page —
+found by rendering the real screen, not by the unit suites.

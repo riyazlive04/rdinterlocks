@@ -222,17 +222,82 @@ export function canCreateTaskFor(
 }
 
 /**
- * Flip a task done / open, or note why it is stuck.
+ * Flip a task's progress, or note why it is stuck.
  *
  * Completing your own work is yours by right, so the assignee passes on id.
  * Anyone else has to outrank them. A telecaller therefore updates their own
  * task and nothing else — not even another telecaller's, since the chain
  * never runs sideways.
+ *
+ * The same rule governs PRIORITY. The assignee is usually the person who
+ * discovers that something is urgent, and a senior can always correct them,
+ * so restricting it to whoever delegated the task would cost more than it
+ * protects.
  */
 export function canUpdateTaskStatus(actor: Actor, task: TaskSubject): Decision {
   if (task.assignedToId === actor.userId) return allow;
   if (canManageTaskOf(actor.role, task.assigneeRole)) return allow;
   return deny("You can only update your own tasks, or your team's.");
+}
+
+/**
+ * What a status change does to the task's timestamps, and whether it is
+ * allowed at all.
+ *
+ * There is deliberately NO one-step-at-a-time rule here, unlike the
+ * fulfilment stages. That rule exists because an order marked `dispatched`
+ * that was never produced reads to the office as sent and is only discovered
+ * when the customer rings. A task marked done that is not done is visible to
+ * the person who assigned it, so the ceremony would buy nothing and would
+ * stop the common case: a five-minute job that never "starts".
+ *
+ * `from`/`to` are the raw stored strings; callers normalize for display.
+ */
+export type TaskStatusChange =
+  | { allowed: false; reason: string }
+  | {
+      allowed: true;
+      /** The same status again — skip the write so timestamps are not churned. */
+      noop: boolean;
+      /** Fields to write. `undefined` means leave the column alone. */
+      startedAt?: Date | null;
+      completedAt?: Date | null;
+      clearStatusReason?: boolean;
+    };
+
+export function decideTaskStatusChange(
+  actor: Actor,
+  task: TaskSubject & { status: string; startedAt: Date | null },
+  to: string,
+  now: Date = new Date()
+): TaskStatusChange {
+  if (to !== "open" && to !== "wip" && to !== "done") {
+    return { allowed: false, reason: `"${to}" is not a task status.` };
+  }
+
+  const who = canUpdateTaskStatus(actor, task);
+  if (!who.allowed) return who;
+
+  if (task.status === to) return { allowed: true, noop: true };
+
+  if (to === "done") {
+    return { allowed: true, noop: false, completedAt: now };
+  }
+
+  if (to === "wip") {
+    return {
+      allowed: true,
+      noop: false,
+      // First pick-up only: a reopened task keeps the date work actually
+      // began, so "started 3 days ago" stays true.
+      startedAt: task.startedAt ?? now,
+      completedAt: null,
+    };
+  }
+
+  // Reopened. A stale "waiting for cement" on a task that is moving again is
+  // worse than no note at all — but startedAt is KEPT, deliberately.
+  return { allowed: true, noop: false, completedAt: null, clearStatusReason: true };
 }
 
 /** Move a task to someone else: must outrank the current holder AND the new one. */

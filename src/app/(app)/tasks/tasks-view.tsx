@@ -4,6 +4,18 @@ import { useRouter } from "next/navigation";
 import { Button, Card, Field, Input, Select, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatShortDate, formatISODate } from "@/lib/format";
+import {
+  PRIORITY_HINT,
+  PRIORITY_LABEL,
+  PRIORITY_TONE,
+  STATUS_LABEL,
+  TASK_PRIORITIES,
+  isTaskActive,
+  isTaskDone,
+  nextTaskStatus,
+  normalizeTaskStatus,
+  type TaskPriority,
+} from "./task-meta";
 
 export type TaskDTO = {
   id: string;
@@ -12,6 +24,8 @@ export type TaskDTO = {
   status: string;
   statusReason: string | null; // why it is parked, if anyone said
   dueDate: string | null; // ISO date or null
+  priority: string; // urgent | high | normal | low
+  startedAt: string | null; // ISO date, or null if nobody has picked it up
   assignedToName: string;
   assigneeRoleLabel: string;
   createdByName: string | null;
@@ -31,7 +45,8 @@ export function TasksView({
   byMeTasks,
   teamTasks,
   onCreate,
-  onToggle,
+  onSetStatus,
+  onSetPriority,
   onReassign,
   onSetReason,
   onDelete,
@@ -46,8 +61,10 @@ export function TasksView({
     details?: string;
     assignedToId: string;
     dueDate?: string;
+    priority?: TaskPriority;
   }) => Promise<void>;
-  onToggle: (id: string, done: boolean) => Promise<void>;
+  onSetStatus: (id: string, status: string) => Promise<void>;
+  onSetPriority: (id: string, priority: string) => Promise<void>;
   onReassign: (id: string, newAssigneeId: string) => Promise<void>;
   onSetReason: (id: string, reason: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -57,6 +74,10 @@ export function TasksView({
   const [details, setDetails] = useState("");
   const [assignedToId, setAssignedToId] = useState(users[0]?.id ?? "");
   const [dueDate, setDueDate] = useState("");
+  const [priority, setPriority] = useState<TaskPriority>("normal");
+  // Which tasks to show. "Everything" is the default so the screen never
+  // hides work by surprise; the filter is opt-in.
+  const [filter, setFilter] = useState<"all" | "urgent" | "overdue" | "unstarted">("all");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -78,6 +99,7 @@ export function TasksView({
           details: details.trim() || undefined,
           assignedToId,
           dueDate: dueDate || undefined,
+          priority,
         });
         setTitle("");
         setDetails("");
@@ -103,8 +125,16 @@ export function TasksView({
     });
   };
 
-  const toggle = (t: TaskDTO) =>
-    runOnRow(() => onToggle(t.id, t.status !== "done"), "Could not update the task");
+  // One tap walks the task forward: not started -> in progress -> done,
+  // and a done task reopens. nextTaskStatus owns that cycle.
+  const advance = (t: TaskDTO) =>
+    runOnRow(() => onSetStatus(t.id, nextTaskStatus(t.status)), "Could not update the task");
+
+  const setStatus = (t: TaskDTO, status: string) =>
+    runOnRow(() => onSetStatus(t.id, status), "Could not update the task");
+
+  const changePriority = (t: TaskDTO, value: string) =>
+    runOnRow(() => onSetPriority(t.id, value), "Could not change the priority");
 
   const reassign = (t: TaskDTO, userId: string) =>
     runOnRow(() => onReassign(t.id, userId), "Could not reassign the task", () =>
@@ -138,24 +168,46 @@ export function TasksView({
   const today = formatISODate(new Date());
 
   const taskRow = (t: TaskDTO, opts: { showAssignee?: boolean }) => {
-    const done = t.status === "done";
+    const done = isTaskDone(t.status);
+    const state = normalizeTaskStatus(t.status);
     const overdue = !done && t.dueDate && t.dueDate < today;
+    const priorityKey = (TASK_PRIORITIES as readonly string[]).includes(t.priority)
+      ? (t.priority as (typeof TASK_PRIORITIES)[number])
+      : "normal";
     return (
       <div key={t.id} className="py-2.5">
         <div className="flex items-start gap-3">
+          {/* One control, three states. A half-filled box means somebody has
+              started: the thing a delegator could not previously tell apart
+              from untouched work. */}
           <button
-            onClick={() => toggle(t)}
+            onClick={() => advance(t)}
             disabled={isPending || !t.canManage}
             className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
               done
                 ? "bg-emerald-600 border-emerald-600 text-white"
-                : t.canManage
-                  ? "bg-white border-slate-300 hover:border-slate-500"
-                  : "bg-slate-50 border-slate-200 cursor-not-allowed"
+                : state === "wip"
+                  ? "bg-amber-400 border-amber-500 text-white"
+                  : t.canManage
+                    ? "bg-white border-slate-300 hover:border-slate-500"
+                    : "bg-slate-50 border-slate-200 cursor-not-allowed"
             }`}
-            aria-label={done ? "Mark as open" : "Mark as done"}
+            aria-label={
+              done
+                ? `Reopen "${t.title}"`
+                : state === "wip"
+                  ? `Mark "${t.title}" done`
+                  : `Start "${t.title}"`
+            }
+            title={`${STATUS_LABEL[state]} — tap to ${
+              done ? "reopen" : state === "wip" ? "finish" : "start"
+            }`}
           >
-            {done && <Icon.Check size={13} stroke={3} />}
+            {done ? (
+              <Icon.Check size={13} stroke={3} />
+            ) : state === "wip" ? (
+              <span className="w-2 h-2 rounded-sm bg-white" />
+            ) : null}
           </button>
           <div className="flex-1 min-w-0">
             <div className={`text-[13px] font-semibold ${done ? "line-through text-slate-400" : "text-ink"}`}>
@@ -181,6 +233,16 @@ export function TasksView({
                   {formatShortDate(new Date(t.dueDate))}
                 </span>
               )}
+              {/* Always text, never colour alone. */}
+              {!done && priorityKey !== "normal" && (
+                <Pill tone={PRIORITY_TONE[priorityKey]}>{PRIORITY_LABEL[priorityKey]}</Pill>
+              )}
+              {!done && state === "wip" && (
+                <Pill tone="warning">
+                  {STATUS_LABEL.wip}
+                  {t.startedAt ? ` since ${formatShortDate(new Date(t.startedAt))}` : ""}
+                </Pill>
+              )}
               {done && <Pill tone="success">done</Pill>}
               {!done && t.statusReason && <Pill tone="warning">parked</Pill>}
               {t.createdByName && !t.isMine && (
@@ -192,6 +254,32 @@ export function TasksView({
             )}
           </div>
           <div className="flex items-center gap-0.5 shrink-0">
+            {t.canManage && !done && (
+              <select
+                value={priorityKey}
+                onChange={(e) => changePriority(t, e.target.value)}
+                disabled={isPending}
+                aria-label={`Priority for "${t.title}"`}
+                title="How urgent is this?"
+                className="h-8 rounded-md border border-slate-200 bg-white text-[11px] font-semibold text-slate-600 px-1"
+              >
+                {TASK_PRIORITIES.map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_LABEL[p]}
+                  </option>
+                ))}
+              </select>
+            )}
+            {t.canManage && !done && state !== "wip" && (
+              <button
+                onClick={() => setStatus(t, "wip")}
+                disabled={isPending}
+                className="h-8 px-2 rounded-md hover:bg-amber-50 text-[11px] font-semibold text-amber-700"
+                title="Mark this as being worked on now"
+              >
+                Start
+              </button>
+            )}
             {t.canManage && !done && (
               <button
                 onClick={() => (parking === t.id ? setParking(null) : openPark(t))}
@@ -287,8 +375,15 @@ export function TasksView({
     empty: React.ReactNode,
     opts: { showAssignee?: boolean }
   ) => {
-    const open = rows.filter((t) => t.status !== "done");
-    const closed = rows.filter((t) => t.status === "done");
+    const matches = (t: TaskDTO) => {
+      if (filter === "urgent") return t.priority === "urgent";
+      if (filter === "overdue") return !!t.dueDate && t.dueDate < today;
+      // "Not picked up" is the question the progress state exists to answer.
+      if (filter === "unstarted") return normalizeTaskStatus(t.status) === "open";
+      return true;
+    };
+    const open = rows.filter((t) => isTaskActive(t.status) && matches(t));
+    const closed = rows.filter((t) => isTaskDone(t.status));
     return (
       <Card>
         <h3 className="text-[14px] font-bold mb-1">
@@ -354,6 +449,18 @@ export function TasksView({
                 <Field label="Due date (optional)">
                   <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
                 </Field>
+                <Field label="Priority" hint={PRIORITY_HINT[priority]}>
+                  <Select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                  >
+                    {TASK_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {PRIORITY_LABEL[p]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
                 <Field label="Details (optional)">
                   <Input
                     value={details}
@@ -372,6 +479,33 @@ export function TasksView({
           )}
         </Card>
       )}
+
+      {/* The filter is opt-in and applies to the OPEN half of every section;
+          done work is always listed in full so nothing looks lost. */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-3" role="group" aria-label="Filter tasks">
+        {(
+          [
+            ["all", "Everything"],
+            ["urgent", "Urgent only"],
+            ["overdue", "Overdue"],
+            ["unstarted", "Not started"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setFilter(key)}
+            aria-pressed={filter === key}
+            className={`px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border transition ${
+              filter === key
+                ? "bg-ink text-white border-ink"
+                : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* Everyone gets this one — it is the whole screen for a telecaller. */}
       {section(

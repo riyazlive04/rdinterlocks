@@ -94,7 +94,10 @@ export default async function TelecallerPanel({ session }: { session: Session })
         },
       }),
       prisma.task.findMany({
-        where: { assignedToId: session.userId, status: "open" },
+        // "not done", not "is open": the live database defaults Task.status to
+      // `wip`, so filtering on "open" exactly hid every in-progress task
+      // from this panel while the tasks page listed it.
+        where: { assignedToId: session.userId, status: { not: "done" } },
         orderBy: [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
         take: 8,
         include: { createdBy: { select: { name: true } } },
