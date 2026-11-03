@@ -21,6 +21,9 @@ model User {
 
   assignedTasks Task[] @relation("TaskAssignee")
   createdTasks  Task[] @relation("TaskCreator")
+  taskComments    TaskComment[]    @relation("TaskCommentAuthor")
+  taskAttachments TaskAttachment[] @relation("TaskAttachmentUploader")
+  checkedItems    TaskChecklistItem[] @relation("ChecklistCompleter")
 
   ownedLeads        Lead[]            @relation("LeadOwner")
   leadActivities    LeadActivity[]
@@ -140,9 +143,119 @@ model Task {
   /// could not previously tell apart from "in progress".
   startedAt    DateTime?
 
+  /// What kind of work this is, from the fixed list in task-meta.ts. Null is
+  /// "uncategorised" and stays legal — a task raised in a hurry must not be
+  /// blocked on filing it.
+  category     String?
+
+  /// How this task repeats: null | daily | weekly | fortnightly | monthly.
+  ///
+  /// The next occurrence is created WHEN THIS ONE IS COMPLETED, not by a
+  /// clock — see lib/task-recurrence.ts. That choice means the feature works
+  /// with no scheduler (this factory has none running) and, more importantly,
+  /// that an uncompleted routine cannot stack up forty copies of itself.
+  recurrence   String?
+
+  /// Set the moment this task spawned its successor, so completing →
+  /// reopening → completing again cannot produce a second one.
+  recurrenceSpawnedAt DateTime?
+
+  /// The occurrence this one was generated from. Kept so a series can be
+  /// traced back; SetNull rather than Cascade, because deleting one old
+  /// occurrence must not delete the whole future chain.
+  recurrenceParentId String?
+  recurrenceParent   Task?  @relation("TaskRecurrence", fields: [recurrenceParentId], references: [id], onDelete: SetNull)
+  recurrenceChildren Task[] @relation("TaskRecurrence")
+
+  checklist   TaskChecklistItem[]
+  comments    TaskComment[]
+  attachments TaskAttachment[]
+
   @@index([assignedToId])
   @@index([status])
   @@index([priority])
+  @@index([category])
+  @@index([recurrenceParentId])
+}
+
+/// One tickable line on a task — the steps of a multi-part job.
+///
+/// Separate rows rather than a text blob so progress is countable ("3 of 5")
+/// without parsing, and so ticking one line is a single small write instead
+/// of a read-modify-write of the whole list that two people could clobber.
+model TaskChecklistItem {
+  id     String  @id @default(cuid())
+  taskId String
+  task   Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  text   String
+  done   Boolean @default(false)
+  /// Position in the list. Ties are broken by createdAt so the order is
+  /// stable rather than whatever the database returns.
+  order  Int     @default(0)
+
+  doneAt       DateTime?
+  doneById     String?
+  doneBy       User?     @relation("ChecklistCompleter", fields: [doneById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
+
+/// A note on a task, in order, by whoever wrote it.
+///
+/// `statusReason` answers "why is this stuck right now" and is overwritten;
+/// this is the running conversation, which is a different thing and must not
+/// overwrite anything. Append-only in spirit: the author or a senior may
+/// delete their own slip, but editing history is not offered.
+model TaskComment {
+  id     String @id @default(cuid())
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  /// SetNull, not Cascade: a comment is part of the task's history and must
+  /// survive the author's account being removed.
+  userId String?
+  user   User?   @relation("TaskCommentAuthor", fields: [userId], references: [id], onDelete: SetNull)
+  /// Snapshotted so a deleted author still reads as a name, not "someone".
+  authorName String @default("")
+
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+/// A file attached to a task — a photo of the broken part, a delivery note.
+///
+/// Stored as bytes in Postgres, the same decision and for the same reason as
+/// QuotationDocument: this app has no object storage and no persistent disk
+/// (the deployment target is a VPS, previously local), so a file on disk
+/// would be the one thing a redeploy loses. Bounded hard by
+/// MAX_ATTACHMENT_BYTES in lib/task-attachments.ts, because bytea in a row is
+/// only reasonable while the rows stay small.
+model TaskAttachment {
+  id     String @id @default(cuid())
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  /// The name as uploaded, sanitised on the way in — it reaches a
+  /// Content-Disposition header.
+  name     String
+  mimeType String
+  byteSize Int
+  data     Bytes
+  /// SHA-256, so "is this the same file" is answerable without the blob.
+  sha256   String
+
+  uploadedById String?
+  uploadedBy   User?   @relation("TaskAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploaderName String  @default("")
+
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
 }
 
 // ─── Master data (admin-managed) ──────────────────────────────────────

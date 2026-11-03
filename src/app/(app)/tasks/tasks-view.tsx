@@ -16,6 +16,7 @@ import {
   normalizeTaskStatus,
   type TaskPriority,
 } from "./task-meta";
+import { TaskDetail, type TaskDetailDTO } from "./task-detail";
 
 export type TaskDTO = {
   id: string;
@@ -26,6 +27,8 @@ export type TaskDTO = {
   dueDate: string | null; // ISO date or null
   priority: string; // urgent | high | normal | low
   startedAt: string | null; // ISO date, or null if nobody has picked it up
+  /** Steps, notes and files. Loaded with the page — these lists are small. */
+  detail: TaskDetailDTO;
   assignedToName: string;
   assigneeRoleLabel: string;
   createdByName: string | null;
@@ -47,6 +50,15 @@ export function TasksView({
   onCreate,
   onSetStatus,
   onSetPriority,
+  onAddStep,
+  onToggleStep,
+  onDeleteStep,
+  onAddComment,
+  onDeleteComment,
+  onUpload,
+  onDeleteAttachment,
+  onSetCategory,
+  onSetRecurrence,
   onReassign,
   onSetReason,
   onDelete,
@@ -65,6 +77,15 @@ export function TasksView({
   }) => Promise<void>;
   onSetStatus: (id: string, status: string) => Promise<void>;
   onSetPriority: (id: string, priority: string) => Promise<void>;
+  onAddStep: (taskId: string, text: string) => Promise<void>;
+  onToggleStep: (itemId: string, done: boolean) => Promise<void>;
+  onDeleteStep: (itemId: string) => Promise<void>;
+  onAddComment: (taskId: string, body: string) => Promise<void>;
+  onDeleteComment: (commentId: string) => Promise<void>;
+  onUpload: (formData: FormData) => Promise<void>;
+  onDeleteAttachment: (attachmentId: string) => Promise<void>;
+  onSetCategory: (taskId: string, category: string | null) => Promise<void>;
+  onSetRecurrence: (taskId: string, recurrence: string | null) => Promise<void>;
   onReassign: (id: string, newAssigneeId: string) => Promise<void>;
   onSetReason: (id: string, reason: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -252,6 +273,19 @@ export function TasksView({
             {!done && t.statusReason && (
               <div className="text-[12px] text-amber-800 mt-1">On hold: {t.statusReason}</div>
             )}
+            <TaskDetail
+              taskId={t.id}
+              detail={t.detail}
+              onAddStep={onAddStep}
+              onToggleStep={onToggleStep}
+              onDeleteStep={onDeleteStep}
+              onAddComment={onAddComment}
+              onDeleteComment={onDeleteComment}
+              onUpload={onUpload}
+              onDeleteAttachment={onDeleteAttachment}
+              onSetCategory={onSetCategory}
+              onSetRecurrence={onSetRecurrence}
+            />
           </div>
           <div className="flex items-center gap-0.5 shrink-0">
             {t.canManage && !done && (

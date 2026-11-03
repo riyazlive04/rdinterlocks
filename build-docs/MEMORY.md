@@ -63,6 +63,12 @@ start of every session. Update whenever a decision is made.
 | Task status has **no one-step rule**, unlike fulfilment stages | The stage rule exists because an order marked `dispatched` that was never made reads as sent and is only found when the customer rings. A task marked done that is not done is visible to whoever assigned it, so the ceremony would buy nothing and would block the common case of a five-minute job that never "starts". |
 | **The assignee may change priority**, not just the delegator | They are usually the person who discovers something is urgent, and a senior can always correct it. Same permission as changing status (`canUpdateTaskStatus`). |
 | Overdue outranks **urgent** in the task sort | A missed deadline is already a failure; an urgent task due next week is not yet one. |
+| Recurrence is **completion-driven**, never clock-driven | Two reasons: this factory runs no scheduler, and — the one that matters — a clock-driven routine nobody completes stacks up. "Sweep the yard" unchecked for six weeks becomes forty-two rows and ruins the one screen meant to say what needs doing. One open occurrence at a time is correct, not a limitation. **Cost:** a missed week is not recorded as missed; read the completion history for that. |
+| Attachments are **bytes in the row**, on an allow-list | Same decision as `QuotationDocument`: no object storage, no persistent disk, so a file on disk is what a redeploy loses. The type is an allow-list, never a block-list, because the file is served to a browser and HTML/SVG/XML can execute in this origin. Only images and PDF go inline; text and CSV are forced as downloads. |
+| The attachment route returns **404, not 403** | For both "no such file" and "not yours", so responses cannot be used to enumerate which attachment ids exist. A cuid is unguessable but it is not a permission — the security review found that exact mistake twice. |
+| **Creator** can always read a task back | The one way `canViewTask` is broader than `canUpdateTaskStatus`. Whoever asked for the work must see the photo of why it could not be done, even after a reorganisation leaves them outranking nobody. |
+| Changing the **instruction** ≠ doing the work | Adding/removing a checklist step and setting recurrence need creator-or-senior standing; ticking a step needs only contributor. Otherwise an assignee could delete the part of the job they did not fancy, or commit a colleague to a daily task forever. |
+| Nobody outranks an **owner**, including for reading | So an owner's task is readable only by its assignee or creator, not by another owner. The phase 4 no-peers rule applied consistently to reading. Pinned by VIS-03. |
 | Base price matrix = the **0–20 km band** | The owner's rate chart prices by distance and has no factory-gate column. Stated as an assumption; change in Settings → Price matrix if collection differs. |
 
 ## Conventions
@@ -97,11 +103,19 @@ start of every session. Update whenever a decision is made.
 - **Call recordings** are deferred. The Transcriber sends only a `callId`; the
   cheapest fix is a `recordingUrl` sent alongside the lead, which needs a
   change on the provider's side and so has a lead time.
-- **Lead intake direction.** The webhook contract assumes the provider pushes
-  to us. `FACEBOOK_FEED_URL` is a pull relay. If the provider hands over a URL
-  for us to call, that is `lib/facebook-feed.ts` plus a scheduled poll instead.
-  **Owner will supply the webhook details later (2026-11-03); nothing to do
-  until then.**
+- ~~**Lead intake direction.**~~ **Resolved 2026-11-03: the provider PUSHES to
+  us**, on channel `metarelay`. Configured in `.env`
+  (`LEAD_WEBHOOK_CHANNELS`), verified end to end against the local server: a
+  signed delivery returns 201 and creates the lead; a forged signature, a
+  missing signature and an unknown channel all return 401. **The secret lives
+  only in `.env`, which is gitignored — it is not in any commit.**
+  `lib/facebook-feed.ts` (the pull relay) is therefore not needed for this.
+  **Open:** the endpoint given is
+  `https://sirah-crm-tfvi.vercel.app/api/v1/leads/webhook/metarelay` — a
+  **Vercel** URL whose path is this app's own route, which contradicts the
+  recorded "not Vercel" deployment decision. Either this app is deployed
+  there after all, or `sirah-crm` is a separate relay that forwards to it.
+  Needs confirming before the channel is treated as live.
 - ~~**Password minimum is 4.**~~ **Resolved:** 8 for owner/admin/manager, 4
   kept for supervisor/telecaller/staff (a short code tapped into a tablet by
   the machine is not the account worth hardening, and raising it pushes the
@@ -116,6 +130,11 @@ start of every session. Update whenever a decision is made.
 ## Known issues
 
 - 16 ESLint warnings, all pre-existing unused imports.
+- **The task extension schema is on the throwaway test database only** —
+  `TaskChecklistItem`, `TaskComment`, `TaskAttachment`, plus `Task.category`,
+  `recurrence`, `recurrenceSpawnedAt`, `recurrenceParentId`. All additive
+  (`migrate diff`: 0 DROP statements). `/tasks` will error on production
+  until pushed.
 - **`Task.priority` and `Task.startedAt` are on the throwaway test database
   only** (two additive columns + one index; `migrate diff` showed no `DROP`).
   Production lacks them, so `/tasks` will error there until pushed.

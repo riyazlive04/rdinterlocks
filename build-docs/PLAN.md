@@ -45,6 +45,7 @@ nothing quoted before it is priced, nothing priced before leads arrive.
 | 10 | Die register (moulds) | [features/die-register.md](features/die-register.md) | Built |
 | 11 | Permission center | [features/permission-center.md](features/permission-center.md) | Built |
 | 12 | Task priority + progress | [features/task-priority.md](features/task-priority.md) | Built |
+| 13 | Task categories, steps, notes, files, recurrence | [features/task-extensions.md](features/task-extensions.md) | Built |
 
 ## Phase 6 — navigation regrouped by role
 

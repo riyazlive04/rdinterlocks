@@ -137,3 +137,143 @@ export function compareTasks(a: SortableTask, b: SortableTask, today: string): n
   if (b.dueDate) return 1;
   return 0;
 }
+
+// ─── Category ─────────────────────────────────────────────────────────
+//
+// A FIXED list, not free text. A typed tag field becomes "Production",
+// "production" and "Prodcution" within a week and then answers nothing, and
+// the whole point of filing a task is to be able to ask "what is outstanding
+// on deliveries". Null stays legal: a task raised in a hurry must not be
+// blocked on choosing one.
+
+export const TASK_CATEGORIES = [
+  "production",
+  "delivery",
+  "maintenance",
+  "customer",
+  "money",
+  "admin",
+] as const;
+
+export type TaskCategory = (typeof TASK_CATEGORIES)[number];
+
+export const CATEGORY_LABEL: Record<TaskCategory, string> = {
+  production: "Production",
+  delivery: "Delivery",
+  maintenance: "Maintenance",
+  customer: "Customer",
+  money: "Money",
+  admin: "Admin",
+};
+
+/** Null/unknown reads as "uncategorised" rather than being coerced. */
+export function normalizeCategory(value: string | null | undefined): TaskCategory | null {
+  return (TASK_CATEGORIES as readonly string[]).includes(value ?? "")
+    ? (value as TaskCategory)
+    : null;
+}
+
+export function categoryLabel(value: string | null | undefined): string {
+  const key = normalizeCategory(value);
+  return key ? CATEGORY_LABEL[key] : "Uncategorised";
+}
+
+// ─── Recurrence ───────────────────────────────────────────────────────
+//
+// The next occurrence is created WHEN THE CURRENT ONE IS COMPLETED, never by
+// a clock. Two reasons, and the second is the important one:
+//
+//  1. This factory runs no scheduler. A calendar-driven recurrence would be
+//     dead on arrival, like the sweep-driven settings already are.
+//  2. A clock-driven routine that nobody completes STACKS UP. "Sweep the
+//     yard" unchecked for six weeks becomes forty-two identical rows, and the
+//     task list — the one screen meant to tell you what needs doing — becomes
+//     the least usable thing in the app. One open occurrence at a time is the
+//     correct behaviour, not a limitation.
+//
+// The cost, stated plainly: a missed week is not recorded as missed. The
+// series simply waits. For "did the weekly service happen" you need the
+// completion history, not the task list.
+
+export const TASK_RECURRENCES = ["daily", "weekly", "fortnightly", "monthly"] as const;
+
+export type TaskRecurrence = (typeof TASK_RECURRENCES)[number];
+
+export const RECURRENCE_LABEL: Record<TaskRecurrence, string> = {
+  daily: "Every day",
+  weekly: "Every week",
+  fortnightly: "Every two weeks",
+  monthly: "Every month",
+};
+
+export function normalizeRecurrence(value: string | null | undefined): TaskRecurrence | null {
+  return (TASK_RECURRENCES as readonly string[]).includes(value ?? "")
+    ? (value as TaskRecurrence)
+    : null;
+}
+
+/**
+ * The next due date in a series.
+ *
+ * Advanced from the PREVIOUS DUE DATE, not from the completion date, so a
+ * weekly task finished three days late is still due on its original weekday
+ * rather than drifting three days every cycle. When there was no due date at
+ * all, the interval runs from completion instead — there is nothing else to
+ * anchor to.
+ *
+ * `monthly` clamps: the 31st of a 30-day month lands on the 30th, not the
+ * 1st of the month after, which is what naive date arithmetic does.
+ */
+export function nextDueDate(
+  recurrence: TaskRecurrence,
+  previousDue: Date | null,
+  completedAt: Date
+): Date {
+  const from = previousDue ?? completedAt;
+  const next = new Date(from.getTime());
+
+  switch (recurrence) {
+    case "daily":
+      next.setDate(next.getDate() + 1);
+      break;
+    case "weekly":
+      next.setDate(next.getDate() + 7);
+      break;
+    case "fortnightly":
+      next.setDate(next.getDate() + 14);
+      break;
+    case "monthly": {
+      const day = next.getDate();
+      next.setDate(1);
+      next.setMonth(next.getMonth() + 1);
+      // Last day of the target month, so the 31st never rolls into the next.
+      const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+      next.setDate(Math.min(day, lastDay));
+      break;
+    }
+  }
+
+  // A series that fell badly behind must not generate an occurrence already
+  // overdue on creation — walk it forward to the first date in the future.
+  // Capped so a task untouched for years cannot spin here.
+  let guard = 0;
+  while (next.getTime() <= completedAt.getTime() && guard < 400) {
+    switch (recurrence) {
+      case "daily":
+        next.setDate(next.getDate() + 1);
+        break;
+      case "weekly":
+        next.setDate(next.getDate() + 7);
+        break;
+      case "fortnightly":
+        next.setDate(next.getDate() + 14);
+        break;
+      case "monthly":
+        next.setMonth(next.getMonth() + 1);
+        break;
+    }
+    guard++;
+  }
+
+  return next;
+}

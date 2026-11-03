@@ -414,3 +414,74 @@ Tests: run-actions.ts 154 → **229/229**. npm test: 1,055 assertions, 0
 failures, exit 0. Caught one real defect during the live check: a non-function
 export (`TASK_STATUS_VALUES`) in a `"use server"` file 500'd the whole page —
 found by rendering the real screen, not by the unit suites.
+
+### Lead intake webhook — direction resolved
+The owner supplied the endpoint and secret (2026-11-03). The provider
+**pushes** to us on channel `metarelay`, so `lib/facebook-feed.ts` (the pull
+relay) is not needed for this.
+
+Configured in `.env` → `LEAD_WEBHOOK_CHANNELS`. **The secret is only in
+`.env`, which is gitignored; it is in no commit.** Verified end to end against
+a local server: a signed delivery returns **201** and creates the lead; a
+forged signature, a missing signature and an unknown channel all return
+**401**.
+
+**Open question raised, not assumed away:** the endpoint is
+`https://sirah-crm-tfvi.vercel.app/...`, a **Vercel** URL whose path is this
+app's own webhook route — which contradicts the recorded "local now, VPS
+later, not Vercel" decision. Either this app is deployed to Vercel after all,
+or `sirah-crm` is a separate relay forwarding to it. Needs confirming before
+the channel is treated as live.
+
+### Task extensions — phase 13
+Five additions to the task model: **categories, checklists, notes, files and
+recurrence.** One feature doc, because they share one permission model, one
+impact map and one test suite.
+
+- **Category** — a fixed list of six, not free text. A typed tag becomes
+  "Production", "production" and "Prodcution" inside a week and then answers
+  nothing. `null` stays legal.
+- **Checklist** — ordered rows, not a blob, so progress is countable and
+  ticking one line cannot clobber another's write. `order` comes from the
+  current maximum, so deleting a middle step never collides.
+- **Notes** — append-only thread, distinct from `statusReason` (which answers
+  "why stuck now" and is overwritten). The author's name is snapshotted, since
+  the relation is `SetNull` and a departed colleague's note would otherwise
+  read as "someone".
+- **Files** — bytes in the row, as `QuotationDocument` already does, because
+  there is no object storage and no persistent disk.
+- **Recurrence** — the next occurrence is created **on completion, never by a
+  clock**. Not only because there is no scheduler, but because a clock-driven
+  routine nobody completes *stacks up*: forty-two copies of "sweep the yard"
+  would ruin the one screen meant to say what needs doing. One open occurrence
+  at a time. The cost is stated in the doc: a missed week is not recorded as
+  missed.
+
+**Security is most of the file feature.** An allow-list, never a block-list —
+HTML, SVG and XML can execute in this origin and are refused outright. Only
+images and PDF are served inline; text and CSV are forced as downloads so a
+file whose bytes contain markup cannot run even if its declared type lied.
+Filenames are sanitised **on the way in and again on the way out** (path
+traversal both ways, CRLF, quotes, semicolons), because the name reaches a
+`Content-Disposition` header. The real buffer length decides the size, not the
+browser's claim. And the download route **authorises**: a cuid is unguessable
+but it is not a permission — the security review found that exact mistake
+twice on this branch — so it runs `canViewTask` and returns **404, not 403**,
+for both "no such file" and "not yours", so ids cannot be enumerated.
+
+Permissions distinguish **changing the instruction from doing the work**:
+adding or removing a step, and setting recurrence, need creator-or-senior
+standing, or an assignee could delete the part of the job they did not fancy,
+or commit a colleague to a daily task forever. Reading adds the **creator**,
+who must be able to see the photo of why their instruction could not be
+carried out even after a reorganisation leaves them outranking nobody.
+
+Schema: 3 tables, 4 Task columns, 6 indexes, 6 FKs — all additive,
+`migrate diff` showed **0 DROP statements**. Applied to the throwaway test
+database only.
+
+Tests: run-task-extensions.ts **164/164**. npm test **1,219 assertions, 0
+failures, exit 0**. Verified live over HTTP: an unrelated telecaller gets 404
+on a valid attachment id, a supervisor gets 404 on another telecaller's file,
+anonymous gets 401, and a telecaller's page contains neither the note nor the
+filename from a task that is not theirs.

@@ -2,14 +2,29 @@ import { prisma } from "@/lib/db";
 import { PageHeader, StatCard } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { requireSession } from "@/lib/auth";
-import { assignableRoles, canDelegate, canManageTaskOf, roleLabel } from "@/lib/roles";
+import {
+  assignableRoles,
+  canDelegate,
+  canManageTaskOf,
+  canDeleteTaskNote,
+  roleLabel,
+} from "@/lib/roles";
 import { formatISODate, formatNumber } from "@/lib/format";
 import { TasksView, type TaskDTO } from "./tasks-view";
 import {
+  addChecklistItem,
+  addTaskAttachment,
+  addTaskComment,
   createTask,
+  deleteChecklistItem,
   deleteTask,
+  deleteTaskAttachment,
+  deleteTaskComment,
   reassignTask,
+  setChecklistItemDone,
+  setTaskCategory,
   setTaskPriority,
+  setTaskRecurrence,
   setTaskStatus,
   setTaskStatusReason,
 } from "./actions";
@@ -29,7 +44,30 @@ export default async function TasksPage() {
   // order actually rendered (overdue, then priority, then due date), because
   // priority rank is not alphabetical and cannot be expressed in SQL here.
   const order = [{ dueDate: "asc" as const }, { createdAt: "desc" as const }];
-  const include = { assignedTo: true, createdBy: true };
+  // The children come with the task rather than on demand: these lists are a
+  // handful of rows each, and a round trip per task just to show a count
+  // would be slower than fetching them.
+  const include = {
+    assignedTo: true,
+    createdBy: true,
+    checklist: {
+      orderBy: [{ order: "asc" as const }, { createdAt: "asc" as const }],
+      include: { doneBy: { select: { name: true } } },
+    },
+    comments: { orderBy: { createdAt: "asc" as const } },
+    // Never `data` — the bytes must not be loaded to render a filename.
+    attachments: {
+      orderBy: { createdAt: "asc" as const },
+      select: {
+        id: true,
+        name: true,
+        mimeType: true,
+        byteSize: true,
+        uploaderName: true,
+        uploadedById: true,
+      },
+    },
+  };
 
   const [mineRaw, byMeRaw, teamRaw, assignable] = await Promise.all([
     // Assigned to me.
@@ -80,15 +118,54 @@ export default async function TasksPage() {
     dueDate: Date | null;
     priority: string;
     startedAt: Date | null;
+    category: string | null;
+    recurrence: string | null;
     assignedToId: string;
     createdById: string | null;
     assignedTo?: { name: string; role: string } | null;
     createdBy?: { name: string } | null;
+    checklist?: Array<{
+      id: string;
+      text: string;
+      done: boolean;
+      doneBy?: { name: string } | null;
+    }>;
+    comments?: Array<{
+      id: string;
+      body: string;
+      authorName: string;
+      userId: string | null;
+      createdAt: Date;
+    }>;
+    attachments?: Array<{
+      id: string;
+      name: string;
+      mimeType: string;
+      byteSize: number;
+      uploaderName: string;
+      uploadedById: string | null;
+    }>;
   }): TaskDTO => {
     const assigneeRole = t.assignedTo?.role ?? "staff";
     const isMine = t.assignedToId === session.userId;
     const outranks = canManageTaskOf(session.role, assigneeRole);
     const isCreator = t.createdById === session.userId;
+
+    // The same subject the actions build, so these booleans and the server's
+    // refusals cannot disagree.
+    const subject = {
+      assignedToId: t.assignedToId,
+      createdById: t.createdById,
+      assigneeRole,
+    };
+    // Contributing (ticking a step, commenting, attaching) is open to anyone
+    // who may see the task: assignee, creator, or a senior.
+    const canContribute = isMine || isCreator || outranks;
+    // Changing the INSTRUCTION — adding/removing steps, setting recurrence —
+    // is the delegator's or a senior's, never the assignee's on their own.
+    const canInstruct = isCreator || outranks;
+    const mayRemoveNote = (authorId: string | null) =>
+      canDeleteTaskNote({ userId: session.userId, role: session.role }, subject, authorId).allowed;
     return {
       id: t.id,
       title: t.title,
@@ -98,6 +175,35 @@ export default async function TasksPage() {
       dueDate: t.dueDate ? formatISODate(t.dueDate) : null,
       priority: normalizePriority(t.priority),
       startedAt: t.startedAt ? formatISODate(t.startedAt) : null,
+      detail: {
+        category: t.category,
+        recurrence: t.recurrence,
+        canContribute,
+        canInstruct,
+        checklist: (t.checklist ?? []).map((c) => ({
+          id: c.id,
+          text: c.text,
+          done: c.done,
+          doneByName: c.doneBy?.name ?? null,
+        })),
+        comments: (t.comments ?? []).map((c) => ({
+          id: c.id,
+          body: c.body,
+          // Falls back to the live relation only if the snapshot is empty,
+          // which is how rows written before authorName existed still read.
+          authorName: c.authorName || "Unknown",
+          createdAt: c.createdAt.toISOString(),
+          canRemove: mayRemoveNote(c.userId),
+        })),
+        attachments: (t.attachments ?? []).map((a) => ({
+          id: a.id,
+          name: a.name,
+          mimeType: a.mimeType,
+          byteSize: a.byteSize,
+          uploaderName: a.uploaderName || "Unknown",
+          canRemove: mayRemoveNote(a.uploadedById),
+        })),
+      },
       assignedToName: t.assignedTo?.name ?? "-",
       assigneeRoleLabel: roleLabel(assigneeRole),
       createdByName: t.createdBy?.name ?? null,
@@ -206,6 +312,42 @@ export default async function TasksPage() {
         onSetPriority={async (id, priority) => {
           "use server";
           await setTaskPriority(id, priority);
+        }}
+        onSetCategory={async (id, category) => {
+          "use server";
+          await setTaskCategory(id, category);
+        }}
+        onSetRecurrence={async (id, recurrence) => {
+          "use server";
+          await setTaskRecurrence(id, recurrence);
+        }}
+        onAddStep={async (id, text) => {
+          "use server";
+          await addChecklistItem(id, text);
+        }}
+        onToggleStep={async (itemId, done) => {
+          "use server";
+          await setChecklistItemDone(itemId, done);
+        }}
+        onDeleteStep={async (itemId) => {
+          "use server";
+          await deleteChecklistItem(itemId);
+        }}
+        onAddComment={async (id, body) => {
+          "use server";
+          await addTaskComment(id, body);
+        }}
+        onDeleteComment={async (commentId) => {
+          "use server";
+          await deleteTaskComment(commentId);
+        }}
+        onUpload={async (formData) => {
+          "use server";
+          await addTaskAttachment(formData);
+        }}
+        onDeleteAttachment={async (attachmentId) => {
+          "use server";
+          await deleteTaskAttachment(attachmentId);
         }}
         onReassign={async (id, userId) => {
           "use server";

@@ -2,16 +2,29 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
-import { TASK_PRIORITIES, normalizePriority } from "./task-meta";
 import { requireSession } from "@/lib/auth";
 import {
+  canContributeToTask,
   canCreateTaskFor,
   canDeleteTask,
+  canDeleteTaskNote,
   canReassignTask,
   canUpdateTaskStatus,
   decideTaskStatusChange,
 } from "@/lib/roles";
+import {
+  TASK_CATEGORIES,
+  TASK_PRIORITIES,
+  TASK_RECURRENCES,
+  normalizePriority,
+} from "./task-meta";
+import { spawnNextOccurrence } from "@/lib/task-recurrence";
+import {
+  attachmentProblem,
+  safeFileName,
+} from "@/lib/task-attachments";
 
 // ─── The one rule every action below shares ────────────────────────────
 //
@@ -55,6 +68,10 @@ const createSchema = z.object({
   // Defaulted rather than required: the form offers it, but a task raised in
   // a hurry should not be blocked on choosing one.
   priority: z.enum(TASK_PRIORITIES).default("normal"),
+  category: z.enum(TASK_CATEGORIES).optional(),
+  recurrence: z.enum(TASK_RECURRENCES).optional(),
+  /** Steps, in order. Blank lines are dropped rather than stored empty. */
+  checklist: z.array(z.string().max(300)).default([]),
 });
 
 /**
@@ -78,6 +95,8 @@ export async function createTask(input: z.input<typeof createSchema>) {
   const decision = canCreateTaskFor(session.role, assignee);
   if (!decision.allowed) throw new Error(decision.reason);
 
+  const steps = p.checklist.map((t) => t.trim()).filter(Boolean);
+
   await prisma.task.create({
     data: {
       title: p.title.trim(),
@@ -86,6 +105,11 @@ export async function createTask(input: z.input<typeof createSchema>) {
       createdById: session.userId,
       dueDate: p.dueDate ? new Date(p.dueDate) : null,
       priority: p.priority,
+      category: p.category ?? null,
+      recurrence: p.recurrence ?? null,
+      ...(steps.length
+        ? { checklist: { create: steps.map((text, order) => ({ text, order })) } }
+        : {}),
     },
   });
   revalidatePath("/tasks");
@@ -121,15 +145,40 @@ export async function setTaskStatus(id: string, status: string) {
   // A double-tap. Skipping the write keeps startedAt and completedAt honest.
   if (decision.noop) return;
 
-  await prisma.task.update({
-    where: { id },
-    data: {
-      status,
-      ...(decision.startedAt !== undefined ? { startedAt: decision.startedAt } : {}),
-      ...(decision.completedAt !== undefined ? { completedAt: decision.completedAt } : {}),
-      ...(decision.clearStatusReason ? { statusReason: null } : {}),
-    },
+  // Completion and the successor it creates happen in ONE transaction. A
+  // daily safety check marked done whose next occurrence was never created is
+  // the failure that matters here, so there must be no state in between.
+  await prisma.$transaction(async (tx) => {
+    await tx.task.update({
+      where: { id },
+      data: {
+        status,
+        ...(decision.startedAt !== undefined ? { startedAt: decision.startedAt } : {}),
+        ...(decision.completedAt !== undefined ? { completedAt: decision.completedAt } : {}),
+        ...(decision.clearStatusReason ? { statusReason: null } : {}),
+      },
+    });
+
+    if (status === "done" && task.recurrence) {
+      await spawnNextOccurrence(
+        tx,
+        {
+          id: task.id,
+          title: task.title,
+          details: task.details,
+          assignedToId: task.assignedToId,
+          createdById: task.createdById,
+          dueDate: task.dueDate,
+          priority: task.priority,
+          category: task.category,
+          recurrence: task.recurrence,
+          recurrenceSpawnedAt: task.recurrenceSpawnedAt,
+        },
+        decision.completedAt ?? new Date()
+      );
+    }
   });
+
   revalidatePath("/tasks");
   revalidatePath("/");
 }
@@ -161,6 +210,278 @@ export async function setTaskPriority(id: string, priority: string) {
   await prisma.task.update({ where: { id }, data: { priority: next } });
   revalidatePath("/tasks");
   revalidatePath("/");
+}
+
+/** Change what kind of work a task is, or clear it. */
+export async function setTaskCategory(id: string, category: string | null) {
+  const session = await requireSession();
+  const task = await loadTaskWithAssignee(id);
+
+  const decision = canUpdateTaskStatus(session, {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  });
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  const next = category ? z.enum(TASK_CATEGORIES).parse(category) : null;
+  await prisma.task.update({ where: { id }, data: { category: next } });
+  revalidatePath("/tasks");
+}
+
+/**
+ * Make a task repeat, or stop it repeating.
+ *
+ * Turning it off does NOT touch occurrences already created — those are real
+ * tasks somebody may be part-way through. It only stops the series going
+ * further.
+ */
+export async function setTaskRecurrence(id: string, recurrence: string | null) {
+  const session = await requireSession();
+  const task = await loadTaskWithAssignee(id);
+
+  // Setting up a standing instruction is a delegation act, so it needs the
+  // same standing as handing the task out — not merely the right to tick it
+  // off. An assignee could otherwise commit themselves, or a colleague, to a
+  // daily job forever.
+  const decision = canDeleteTask(session, {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  });
+  if (!decision.allowed) {
+    throw new Error("Only whoever assigned this task — or their senior — can make it repeat.");
+  }
+
+  const next = recurrence ? z.enum(TASK_RECURRENCES).parse(recurrence) : null;
+  await prisma.task.update({ where: { id }, data: { recurrence: next } });
+  revalidatePath("/tasks");
+}
+
+// ─── Checklist ────────────────────────────────────────────────────────
+
+/**
+ * Add a step.
+ *
+ * `order` is derived from the current maximum rather than the row count, so
+ * deleting a middle step does not make the next one collide with an existing
+ * position.
+ */
+export async function addChecklistItem(taskId: string, text: string) {
+  const session = await requireSession();
+  const task = await loadTaskWithAssignee(taskId);
+  const subject = {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  };
+  const decision = canContributeToTask(session, subject);
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  const body = z.string().min(1).max(300).parse(text.trim());
+  const last = await prisma.taskChecklistItem.findFirst({
+    where: { taskId },
+    orderBy: { order: "desc" },
+    select: { order: true },
+  });
+  await prisma.taskChecklistItem.create({
+    data: { taskId, text: body, order: (last?.order ?? -1) + 1 },
+  });
+  revalidatePath("/tasks");
+}
+
+/** Tick or untick a step, recording who did it. */
+export async function setChecklistItemDone(itemId: string, done: boolean) {
+  const session = await requireSession();
+  const item = await prisma.taskChecklistItem.findUnique({
+    where: { id: itemId },
+    include: { task: { include: { assignedTo: { select: { role: true } } } } },
+  });
+  if (!item) throw new Error("That step no longer exists.");
+
+  const decision = canContributeToTask(session, {
+    assignedToId: item.task.assignedToId,
+    createdById: item.task.createdById,
+    assigneeRole: item.task.assignedTo.role,
+  });
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  await prisma.taskChecklistItem.update({
+    where: { id: itemId },
+    data: {
+      done,
+      doneAt: done ? new Date() : null,
+      doneById: done ? session.userId : null,
+    },
+  });
+  revalidatePath("/tasks");
+}
+
+export async function deleteChecklistItem(itemId: string) {
+  const session = await requireSession();
+  const item = await prisma.taskChecklistItem.findUnique({
+    where: { id: itemId },
+    include: { task: { include: { assignedTo: { select: { role: true } } } } },
+  });
+  if (!item) return;
+
+  // A step is part of the instruction, so removing one is the delegator's
+  // call or a senior's — not the assignee's, who would otherwise be able to
+  // delete the part of the job they do not want to do.
+  const decision = canDeleteTask(session, {
+    assignedToId: item.task.assignedToId,
+    createdById: item.task.createdById,
+    assigneeRole: item.task.assignedTo.role,
+  });
+  if (!decision.allowed) {
+    throw new Error("Only whoever assigned this task — or their senior — can remove a step.");
+  }
+
+  await prisma.taskChecklistItem.delete({ where: { id: itemId } });
+  revalidatePath("/tasks");
+}
+
+// ─── Comments ─────────────────────────────────────────────────────────
+
+/**
+ * Add a note to the thread.
+ *
+ * The author's name is SNAPSHOTTED alongside the id: the relation is
+ * `SetNull`, so a comment written by someone who has since left would
+ * otherwise read as "someone" on a record that may matter later.
+ */
+export async function addTaskComment(taskId: string, body: string) {
+  const session = await requireSession();
+  const task = await loadTaskWithAssignee(taskId);
+
+  const decision = canContributeToTask(session, {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  });
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  const text = z.string().min(1).max(2000).parse(body.trim());
+  await prisma.taskComment.create({
+    data: { taskId, userId: session.userId, authorName: session.name, body: text },
+  });
+  revalidatePath("/tasks");
+}
+
+export async function deleteTaskComment(commentId: string) {
+  const session = await requireSession();
+  const comment = await prisma.taskComment.findUnique({
+    where: { id: commentId },
+    include: { task: { include: { assignedTo: { select: { role: true } } } } },
+  });
+  if (!comment) return;
+
+  const decision = canDeleteTaskNote(
+    session,
+    {
+      assignedToId: comment.task.assignedToId,
+      createdById: comment.task.createdById,
+      assigneeRole: comment.task.assignedTo.role,
+    },
+    comment.userId
+  );
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  await prisma.taskComment.delete({ where: { id: commentId } });
+  revalidatePath("/tasks");
+}
+
+// ─── Attachments ──────────────────────────────────────────────────────
+
+/**
+ * Attach a file.
+ *
+ * Takes FormData rather than a serialised payload, because a 5 MB photo
+ * base64'd into a server-action argument is a third bigger and has to be held
+ * in memory as a string on both sides.
+ *
+ * Every check runs on the SERVER against the real bytes: the declared size is
+ * not trusted (the actual buffer length decides), the type is checked against
+ * an allow-list, and the name is sanitised because it reaches a
+ * Content-Disposition header.
+ */
+export async function addTaskAttachment(formData: FormData) {
+  const session = await requireSession();
+  const taskId = z.string().min(1).parse(formData.get("taskId"));
+  const file = formData.get("file");
+  if (!(file instanceof File)) throw new Error("Pick a file to attach.");
+
+  const task = await loadTaskWithAssignee(taskId);
+  const decision = canContributeToTask(session, {
+    assignedToId: task.assignedToId,
+    createdById: task.createdById,
+    assigneeRole: task.assignedTo.role,
+  });
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  const existing = await prisma.taskAttachment.count({ where: { taskId } });
+  const problem = attachmentProblem(
+    { name: file.name, type: file.type, size: file.size },
+    existing
+  );
+  if (problem) throw new Error(problem);
+
+  // The real bytes, not the browser's claim about them.
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const recheck = attachmentProblem(
+    { name: file.name, type: file.type, size: bytes.byteLength },
+    existing
+  );
+  if (recheck) throw new Error(recheck);
+
+  const name = safeFileName(file.name);
+  await prisma.taskAttachment.create({
+    data: {
+      taskId,
+      name,
+      mimeType: file.type,
+      byteSize: bytes.byteLength,
+      data: bytes,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      uploadedById: session.userId,
+      uploaderName: session.name,
+    },
+  });
+  revalidatePath("/tasks");
+}
+
+export async function deleteTaskAttachment(attachmentId: string) {
+  const session = await requireSession();
+  const file = await prisma.taskAttachment.findUnique({
+    where: { id: attachmentId },
+    // Never select `data` — this only needs to decide and delete.
+    select: {
+      id: true,
+      uploadedById: true,
+      task: {
+        select: {
+          assignedToId: true,
+          createdById: true,
+          assignedTo: { select: { role: true } },
+        },
+      },
+    },
+  });
+  if (!file) return;
+
+  const decision = canDeleteTaskNote(
+    session,
+    {
+      assignedToId: file.task.assignedToId,
+      createdById: file.task.createdById,
+      assigneeRole: file.task.assignedTo.role,
+    },
+    file.uploadedById
+  );
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  await prisma.taskAttachment.delete({ where: { id: attachmentId } });
+  revalidatePath("/tasks");
 }
 
 const reasonSchema = z.string().max(300);

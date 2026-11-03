@@ -60,16 +60,17 @@ All figures below are from a real run against a throwaway Postgres on
 | `run-pricing.ts` | The rate chart, transcribed twice and compared | **226/226** |
 | `run-rbac.ts` | RBAC, duty, payment gate, security fixes | **52/52** |
 | `run-actions.ts` | Stage transitions, task delegation, priority & progress, password rule | **229/229** |
+| `run-task-extensions.ts` | Categories, checklists, notes, files, recurrence | **164/164** |
 | `run-collections.ts` | Outstanding balance and ageing (phase 7) | **73/73** |
 | `run-allocation.ts` | Godown stock allocation (phase 8) | **51/51** |
 | `run-die.ts` | Die register: lifecycle, money unwind, three gates | **46/46** |
 | `run-permissions.ts` | Area grouping, grant writes, who may administer whom | **79/79** |
 | `run-db.ts` | Quotation pricing/numbering, the real order-to-cash spine, WhatsApp gates, Meta ingestion | **121/121** |
 | `run-pdf.ts` | PDF render, pagination, XSS escaping, Tamil shaping | **18/18** |
-| `probe-routes.mjs` | All 63 routes, authenticated as owner | all 200 |
+| `probe-routes.mjs` | All 64 routes, authenticated as owner | all 200 |
 | `npm run build` | Production build | clean |
 
-**1,055 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
+**1,219 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
 all pre-existing unused imports.
 
 ### Notable cases
@@ -94,6 +95,9 @@ all pre-existing unused imports.
 | `TASK-11` | A legacy `wip` row counts as active. Written as "not done" rather than "is open", which is exactly the mistake that hid those rows from all three dashboards. |
 | `TASK-15` | Runs the **old** `status: "open"` filter alongside the new one and asserts the old one saw fewer tasks — the bug is demonstrated, not just fixed. |
 | `TASK-08` | A deliberate duplicate of TASK-01's core, as a regression pin that priority and progress did not widen who may assign to whom. |
+| `ATT-02` | Filenames cannot escape a `Content-Disposition` header — path traversal both ways, CRLF injection, quotes and semicolons. The name reaches a header, so it is sanitised on the way in **and** again on the way out. |
+| `REC-04` | Reopening and re-completing a repeating task makes no second successor. Without the conditional claim the reopen button is a task duplicator. |
+| `REC-06` | An uncompleted daily routine still has exactly one row after six months — the argument for completion-driven recurrence, asserted rather than asserted-about. |
 
 ### Fixed on this branch
 

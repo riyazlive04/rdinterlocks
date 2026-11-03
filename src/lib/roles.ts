@@ -300,6 +300,57 @@ export function decideTaskStatusChange(
   return { allowed: true, noop: false, completedAt: null, clearStatusReason: true };
 }
 
+/**
+ * May this actor SEE the task at all — its comments, its files, its checklist?
+ *
+ * Broader than `canUpdateTaskStatus` on purpose, and in exactly one way: the
+ * CREATOR is included. Someone who handed out a task must be able to read
+ * what came back on it even after a reorganisation leaves them no longer
+ * outranking the assignee — otherwise the person who asked for the work
+ * cannot see the photo of why it could not be done.
+ *
+ * It is NOT "anyone who can open /tasks". A telecaller must not read the
+ * comment thread on another telecaller's task; the chain never runs sideways
+ * for reading any more than for writing.
+ */
+export function canViewTask(actor: Actor, task: TaskSubject): Decision {
+  if (task.assignedToId === actor.userId) return allow;
+  if (task.createdById === actor.userId) return allow;
+  if (canManageTaskOf(actor.role, task.assigneeRole)) return allow;
+  return deny("That task is not yours or your team's.");
+}
+
+/**
+ * May this actor add a comment, tick a checklist line, or attach a file?
+ *
+ * Same answer as viewing. Anyone with a legitimate reason to read the thread
+ * has a legitimate reason to reply to it — a manager who can see that a job
+ * is blocked needs to be able to say what to do about it, and the creator
+ * needs to be able to answer a question asked on their own instruction.
+ * Deleting is narrower; see canDeleteTaskNote.
+ */
+export function canContributeToTask(actor: Actor, task: TaskSubject): Decision {
+  return canViewTask(actor, task);
+}
+
+/**
+ * May this actor delete someone else's comment or file?
+ *
+ * Your own, always — a wrong photo or a half-typed note should not need a
+ * manager. Somebody else's only if you outrank the assignee, because a task
+ * thread is a record and quietly removing another person's note from it is
+ * not the assignee's business even on their own task.
+ */
+export function canDeleteTaskNote(
+  actor: Actor,
+  task: TaskSubject,
+  authorId: string | null
+): Decision {
+  if (authorId && authorId === actor.userId) return allow;
+  if (canManageTaskOf(actor.role, task.assigneeRole)) return allow;
+  return deny("Only the person who added it, or their senior, can remove it.");
+}
+
 /** Move a task to someone else: must outrank the current holder AND the new one. */
 export function canReassignTask(
   actor: Actor,
