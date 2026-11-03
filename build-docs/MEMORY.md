@@ -56,6 +56,9 @@ start of every session. Update whenever a decision is made.
 | Access areas carry a **group**, the same five as the nav | 22 flat checkboxes in declaration order is the wall phase 6 removed from the sidebar, and the permission screen is the one place a mis-click hands somebody the payroll. PERM-01 asserts every area is in exactly one group — an ungrouped area would not render and would look identical to a revoked grant. |
 | `setUserArea` is **one area at a time**, not a reuse of `updateUser` | `updateUser` takes name, role, permissions and active together, so driving one checkbox through it means the browser sends the whole user back: a stale tab could revert a rename or re-enable a disabled login. One-area writes also mean two owners toggling different areas cannot clobber each other. |
 | Per-area grants are **not stored** for full-access roles | `isAdmin` short-circuits `can()`, so writing a grant for an owner or manager would be a lie the UI then has to explain. The matrix shows "everything" and points at the role instead. |
+| Zone renames happen **in place** (`ZoneDef.renameFrom`) | The seeder upserts on `name`, so renaming a zone would create a second row and orphan the first — still holding its ZonePrices and still offered in the dropdown. Two plausible zones for one place is worse on a priced document than a stale name. RATE-07 asserts no rename target collides with a live name. |
+| The rate chart is transcribed **twice** | Once as `prisma/delivery-zone-defs.ts`, once in `scripts/e2e/run-pricing.ts`, read off the PDF independently, and compared cell by cell. A mistyped digit fails nothing on its own — it quotes a plausible wrong price that is only found after the customer has the document. One copy proves nothing. |
+| **Karnataka = customer's own transport** (assumption) | The 2026-11-03 sheet adds "Karnataka (Transport own)" at ₹44/₹54. Read as the customer arranging their own lorry, because ₹44/₹54 sits just under the 0-20 km band and far below 300 km+ (₹61/₹78) — only possible if no delivery is being paid for. **If it means RD sends its own vehicle, the row is wrong and the price is far too low.** Flagged to the owner, not silently assumed. |
 | Base price matrix = the **0–20 km band** | The owner's rate chart prices by distance and has no factory-gate column. Stated as an assumption; change in Settings → Price matrix if collection differs. |
 
 ## Conventions
@@ -72,15 +75,21 @@ start of every session. Update whenever a decision is made.
 
 ## Open questions
 
-- **Above 160 km conflicts.** The owner's v2.0 chart says one flat rate
-  (₹58 / ₹73). The seeded data also has a *300 km & above* band at ₹61 / ₹78
-  from the older sheet. Both are live; needs a ruling.
+- ~~**Above 160 km conflicts.**~~ **Resolved by the 2026-11-03 sheet**, which
+  lists both rows explicitly as separate bands: *above (160-300)* at ₹58/₹73
+  and *300 kms & above* at ₹61/₹78. It was never a conflict — both were right.
+  The 160-300 band also turned out to contain **Dindigul**, which had been
+  transcribed into 110-160 (₹3-6/brick under-quote on every Dindigul job).
 - **`masonRate` is 0** on all four price rows — the rate chart is sell-side
-  only. Mason payouts compute as zero until filled in. **Now visible rather
-  than silent:** Settings → Price matrix counts the gaps, names the
-  combinations and says what each one breaks. Still needs the figures.
-- **Godown is unpriced.** It is a ConstructionType but absent from the chart,
-  so quoting it is refused.
+  only, and **the 2026-11-03 sheet still is**, so this is not something a new
+  chart will fix. Mason payouts compute as zero until filled in. **Now visible
+  rather than silent:** Settings → Price matrix counts the gaps, names the
+  combinations and says what each one breaks. Still needs the figures from the
+  owner.
+- **Godown is unpriced.** It is a ConstructionType but absent from the chart —
+  **still absent from the 2026-11-03 sheet**, which has only C (Compound) and
+  R (Room) columns. Quoting it is refused, with a message naming the fix
+  (TC-DBQ-03). Needs a Godown rate from the owner, or the type retiring.
 - **Call recordings** are deferred. The Transcriber sends only a `callId`; the
   cheapest fix is a `recordingUrl` sent alongside the lead, which needs a
   change on the provider's side and so has a lead time.
@@ -103,6 +112,11 @@ start of every session. Update whenever a decision is made.
 ## Known issues
 
 - 16 ESLint warnings, all pre-existing unused imports.
+- **The 2026-11-03 rate chart has been applied to the throwaway test database
+  only.** Production still has the old zones, so Dindigul still quotes at the
+  110-160 km rate there and Karnataka is unquotable. Run
+  `npx tsx prisma/seed-delivery-zones.ts` (dry run first — it prints the two
+  renames and the one new band) when the owner says to go live.
 - `Settings.stockAllocationEnforced` has been pushed to the **throwaway test
   database only**. Production still lacks the column, so the automation page
   will error there until it is pushed. One additive `ADD COLUMN`, no `DROP`

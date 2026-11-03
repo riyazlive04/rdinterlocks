@@ -57,6 +57,7 @@ All figures below are from a real run against a throwaway Postgres on
 |---|---|---|
 | `run-nav.ts` | Navigation grouping (phase 6) | **50/50** |
 | `run-offline.ts` | Lead normalisation, webhook signing, pure logic | **128/128** |
+| `run-pricing.ts` | The rate chart, transcribed twice and compared | **226/226** |
 | `run-rbac.ts` | RBAC, duty, payment gate, security fixes | **52/52** |
 | `run-actions.ts` | Stage transitions, task delegation, password rule | **154/154** |
 | `run-collections.ts` | Outstanding balance and ageing (phase 7) | **73/73** |
@@ -68,7 +69,7 @@ All figures below are from a real run against a throwaway Postgres on
 | `probe-routes.mjs` | All 63 routes, authenticated as owner | all 200 |
 | `npm run build` | Production build | clean |
 
-**754 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
+**980 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
 all pre-existing unused imports.
 
 ### Notable cases
@@ -87,6 +88,9 @@ all pre-existing unused imports.
 | `DIE-07` | Deleting a costed die strands no `CashEntry` — the production incident recorded in MEMORY, now a permanent assertion. |
 | `PERM-01` | Every access area is in exactly one group, and no group names an area that does not exist. An ungrouped area would silently not render and look exactly like a revoked grant. |
 | `PERM-12` | A revoked grant binds on the next read, which is only true because the security review made sessions revocable. Pinned on the screen that makes the promise. |
+| `RATE-01` | The rate chart is written out **twice** — once as the app's data, once in the suite, read off the PDF independently — and the two are compared cell by cell. One copy proves nothing; a mistyped digit does not fail anything on its own, it just quotes the wrong price. |
+| `RATE-03` | Dindigul is in the 160-300 km band, pinned by name because that is the error the new sheet caught: it had been transcribed into 110-160, a ₹3/brick under-quote. |
+| `RATE-08` | Every one of the 9 bands is priced **through `resolveQuotationItems`**, not just checked as data — the path a telecaller actually takes. |
 
 ### Fixed on this branch
 

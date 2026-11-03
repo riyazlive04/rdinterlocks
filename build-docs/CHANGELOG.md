@@ -322,3 +322,52 @@ locked, a telecaller is redirected, the manager row shows "everything" rather
 than 22 checkboxes, and all five group headers render.
 
 **npm test: 754 assertions, 0 failures, exit 0.**
+
+### Rate chart updated from the 2026-11-03 sheet
+Source: `AREA RATE RD BRICKS.pdf- Google Sheets.pdf`.
+
+**Every price is unchanged.** All nine bands match what was already seeded, so
+no quotation had been priced wrongly by a *rate*. What the new sheet corrected
+was which band a place sits in — and that is where the money was:
+
+- **Dindigul moved from 110-160 km to 160-300 km.** 6" Room ₹55 → ₹58, 8" Room
+  ₹67 → ₹73. The old transcription under-quoted every Dindigul job by
+  ₹3-6/brick; on 5,000 bricks that is ₹15,000-30,000.
+- **New band: Karnataka (customer's own transport), ₹44/₹54** — previously
+  unquotable. *Assumption flagged:* "Transport own" is read as the customer
+  arranging their own lorry, because ₹44/₹54 sits just under the 0-20 km band
+  and far below 300 km+ (₹61/₹78), which only works if no delivery is being
+  paid for. If it means RD sends its own vehicle, the row is wrong.
+- **The 160 km+ "conflict" was never a conflict.** MEMORY recorded that the
+  v2.0 chart said one flat ₹58/₹73 while the data also had a 300 km+ band at
+  ₹61/₹78, and asked for a ruling. The new sheet lists both rows explicitly as
+  separate bands. Both were right.
+- The two far bands now **name their districts** instead of reading "Other
+  districts", and six area names the sheet carried were missing: Poonachi and
+  Chennampatti (0-40), Chinnappampatti (40-60), Kannakurichi (60-90),
+  Salem Puthuchathiram / Thingalur / Pasur / Vellakovil (90-110),
+  Uthangarai (110-160).
+
+**Renames are done in place.** The seeder upserts on `name`, so a renamed zone
+would be created fresh and the old row left orphaned — still holding its
+ZonePrices and still offered in the zone dropdown. `ZoneDef.renameFrom` makes
+it rename the existing row, keeping its id and any quotation history. Verified
+9 zones before and 9 after, with a dry run that reports renames rather than
+implying a duplicate.
+
+**The chart is now transcribed twice** — once as the app's data, once in
+`scripts/e2e/run-pricing.ts` read off the PDF independently — and compared cell
+by cell. A mistyped digit fails nothing on its own; it produces a plausible
+wrong price found only after the customer has the document. RATE-08 also prices
+all nine bands through `resolveQuotationItems`, the path a telecaller takes.
+
+Still not on the sheet, so still unresolved: **Godown** (only C and R columns,
+so it stays unquotable), **6"H** (falls back to the flat matrix), and
+**masonRate / productionCost** — the sheet is sell-side only, so a new chart
+will not fix those.
+
+**Applied to the throwaway test database only — production untouched**, per the
+instruction not to move to production yet.
+
+Tests: scripts/e2e/run-pricing.ts, 226/226. npm test: 980 assertions, 0
+failures, exit 0.

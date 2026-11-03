@@ -56,3 +56,43 @@ error on a priced document.
 5. An unpriced size+type combination is refused by name. ✅
 
 Tests: `scripts/e2e/run-rbac.ts` case `QUOTE-01`.
+
+
+## Rate chart revision — 2026-11-03
+
+Source: `AREA RATE RD BRICKS.pdf- Google Sheets.pdf`.
+
+**Every price is unchanged.** All nine bands' figures match what was already
+seeded, so no existing quotation was priced wrongly by a rate. What changed is
+which band a place sits in, and one new band.
+
+| Change | Effect |
+|---|---|
+| **Dindigul moved** from 110-160 km to 160-300 km | 6" Room ₹55 → ₹58, 8" Room ₹67 → ₹73. The old transcription under-quoted every Dindigul job by ₹3-6/brick. |
+| **New band: Karnataka (customer's own transport)** — ₹44/₹54 | Previously unquotable. See the assumption below. |
+| 160-300 km renamed from "Other districts" | Now names Dindigul, Trichy, Thanjavur, Udamalaipettai, as the sheet does. |
+| 300 km & above renamed from "Other districts" | Now names Chennai, Madurai, Ramanathapuram, Tirunelveli. |
+| Area names added | Poonachi + Chennampatti (0-40, both were on the sheet and missing), Chinnappampatti (40-60), Kannakurichi (60-90), Salem Puthuchathiram/Thingalur/Pasur/Vellakovil (90-110), Uthangarai (110-160). |
+
+**The 160 km+ question is answered, not a conflict.** MEMORY recorded "the v2.0
+chart says one flat rate (₹58/₹73); the seeded data also has a 300 km & above
+band at ₹61/₹78 — both are live, needs a ruling". The new sheet lists both
+rows explicitly as separate bands. Both were right all along.
+
+**Renames are done in place.** The seeder upserts on `name`, so a renamed zone
+would be created fresh and the old row left orphaned — still holding its
+ZonePrices and still offered in the dropdown. `ZoneDef.renameFrom` makes the
+seeder rename the existing row instead, keeping its id and any quotation
+history pointing at it. Verified: 9 zones before, 9 after.
+
+**Assumption, flagged rather than buried.** "Karnataka (Transport own)" is read
+as *the customer arranges their own lorry*, so the rate carries no delivery
+cost. The figures force that reading — ₹44/₹54 sits just under the 0-20 km band
+and far below 300 km+ (₹61/₹78), which only works if nothing is being paid to
+move the bricks. If it actually means RD sends its own vehicle to Karnataka,
+this row is badly wrong and the price belongs much higher.
+
+**Still not on the sheet:** Godown (so it remains unquotable, refused with a
+message naming the fix), 6"H (falls back to the flat matrix), and `masonRate` /
+`productionCost` — the sheet is sell-side only, so those stay at 0 on the live
+database and the Price matrix page now says so.

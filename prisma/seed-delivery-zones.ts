@@ -1,7 +1,8 @@
 import { PrismaClient } from "@prisma/client";
 import { DELIVERY_ZONE_DEFS } from "./delivery-zone-defs";
 
-// One-off seed for the "AREA RATE RD BRICKS" reference sheet, safe to run
+// Seed for the "AREA RATE RD BRICKS" reference sheet (current source: the
+// 2026-11-03 PDF export; see prisma/delivery-zone-defs.ts), safe to run
 // against a LIVE database: upserts DeliveryZone rows by name (idempotent —
 // re-running just updates the same rows, never duplicates), plus their
 // ZoneBrickRule and ZonePrice children. Requires the "6"" and "8"" BrickSize
@@ -60,6 +61,28 @@ async function main() {
     console.log(`${i + 1}. ${def.name} (${def.distanceLabel})`);
     let zoneId: string;
     if (apply) {
+      // Rename in place before upserting.
+      //
+      // The upsert keys on `name`, so a zone that has been renamed on the
+      // sheet would otherwise be CREATED fresh and the old row left behind —
+      // still holding its ZonePrices and still offered in the zone dropdown.
+      // On a priced document, two plausible zones for one place is worse than
+      // a stale name. Only renamed when the old row exists AND the new name
+      // does not, so re-running is still idempotent.
+      for (const previous of def.renameFrom ?? []) {
+        const [stale, current] = await Promise.all([
+          prisma.deliveryZone.findUnique({ where: { name: previous } }),
+          prisma.deliveryZone.findUnique({ where: { name: def.name } }),
+        ]);
+        if (stale && !current) {
+          await prisma.deliveryZone.update({
+            where: { id: stale.id },
+            data: { name: def.name },
+          });
+          console.log(`   renamed from ${JSON.stringify(previous)} (kept its id and history)`);
+        }
+      }
+
       const zone = await prisma.deliveryZone.upsert({
         where: { name: def.name },
         update: { distanceLabel: def.distanceLabel, areas: def.areas, order: i },
@@ -93,7 +116,21 @@ async function main() {
       }
     } else {
       const existing = await prisma.deliveryZone.findUnique({ where: { name: def.name } });
-      console.log(`   ${existing ? "already exists — would update" : "would create"}`);
+      if (existing) {
+        console.log("   already exists — would update");
+      } else {
+        // Say "rename" rather than "create" when the old row is still there,
+        // so a dry run cannot imply a duplicate is about to appear.
+        let renamed = false;
+        for (const previous of def.renameFrom ?? []) {
+          const stale = await prisma.deliveryZone.findUnique({ where: { name: previous } });
+          if (stale) {
+            console.log(`   would RENAME ${JSON.stringify(previous)} -> ${JSON.stringify(def.name)}`);
+            renamed = true;
+          }
+        }
+        if (!renamed) console.log("   would create");
+      }
     }
     console.log(
       `   min: 6"=${def.minBricks6 || "none"} 8"=${def.minBricks8 || "none"} · transport-only: 6"=${
