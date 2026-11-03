@@ -14,6 +14,7 @@ import {
 import { stageForAge } from "@/lib/stock";
 import { can } from "@/lib/access";
 import { roleLabel } from "@/lib/roles";
+import { collectionsQueue } from "@/lib/outstanding";
 
 /**
  * The whole-business dashboard — Owner and Manager share it.
@@ -171,11 +172,15 @@ export default async function OwnerPanel({ session }: { session: Session }) {
     stageMap[st] += b.remaining;
   }
 
-  const totalDue = pendingOrders.reduce((s, o) => {
-    const ordered = o.items.reduce((x, i) => x + i.total, 0);
-    const paid = o.payments.reduce((x, p) => x + p.amount, 0);
-    return s + Math.max(0, ordered - paid);
-  }, 0);
+  // Due from clients, from lib/outstanding.ts.
+  //
+  // This was computed inline over `pendingOrders`, which is `take: 5` — so
+  // the headline receivables figure on the owner's home screen was the due on
+  // the five most recent open orders, not the total, and understated it
+  // silently with no sign on screen that it was a sample. It also counted
+  // order-linked payments only and ignored add-ons and returns.
+  const collections = await collectionsQueue();
+  const totalDue = collections.totals.debt;
 
   const pendingPaymentCount = pendingPaymentTotals._count;
   const pendingPaymentValue = pendingPaymentTotals._sum.amount ?? 0;
@@ -463,7 +468,11 @@ export default async function OwnerPanel({ session }: { session: Session }) {
         <KPI
           label="Due from clients"
           value={formatINR(totalDue, { compact: true })}
-          sub={`${pendingOrders.length} active orders`}
+          sub={
+            collections.totals.buckets.d60plus > 0
+              ? `${collections.totals.clients} clients · ${formatINR(collections.totals.buckets.d60plus, { compact: true })} over 60d`
+              : `${collections.totals.clients} client${collections.totals.clients === 1 ? "" : "s"} owing`
+          }
           tone="red"
           icon={<Icon.Receipt size={18} color="#fff" />}
         />

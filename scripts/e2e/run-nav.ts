@@ -131,7 +131,13 @@ const fullAccess = tc("NAV-05", "owner and manager see all five groups", () => {
   eq("manager", groupKeys("manager"), all);
   const nav = groupedNav(primaryNav, userFor("owner"));
   const money = nav.groups.find((g) => g.key === "money")!;
-  eq("Money", ids(money.items), ["cash", "expense", "payments", "reports"]);
+  eq("Money holds the collections queue", ids(money.items), [
+    "cash",
+    "collections",
+    "expense",
+    "payments",
+    "reports",
+  ]);
 });
 
 /** AC NAV-06: an empty group is absent, not a heading with nothing under it. */
@@ -178,6 +184,7 @@ const activeState = tc("NAV-09", "active highlighting still resolves", () => {
   ok("leads active on a child route", isNavActive(find("leads"), "/leads/board"));
   // /quotations/review must light the review entry; it also prefix-matches
   // /quotations, which is why both are listed rather than assumed exclusive.
+  ok("collections active", isNavActive(find("collections"), "/collections"));
   ok("quote review active", isNavActive(find("quote-review"), "/quotations/review"));
 });
 

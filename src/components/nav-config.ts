@@ -200,6 +200,17 @@ export const primaryNav: NavItem[] = [
     group: "money",
   },
   {
+    id: "collections",
+    label: "Collections",
+    href: "/collections",
+    icon: "Cash",
+    matches: ["/collections"],
+    // `revenue` is already "may see money totals", which is exactly what an
+    // outstanding-balance queue is. No new access area for it.
+    area: "revenue",
+    group: "money",
+  },
+  {
     id: "fulfilment",
     label: "Production queue",
     href: "/fulfilment",

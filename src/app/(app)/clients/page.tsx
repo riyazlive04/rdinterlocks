@@ -5,6 +5,7 @@ import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR } from "@/lib/format";
 import { Pagination } from "@/components/pagination";
+import { outstandingByClient } from "@/lib/outstanding";
 
 const PAGE_SIZE = 50;
 
@@ -29,18 +30,21 @@ export default async function ClientsPage({
           }
         : {}),
     },
-    include: {
-      payments: true,
-      orders: {
-        include: { items: true, slabItems: true, payments: true, deliveries: { include: { items: true } } },
-      },
-    },
+    select: { id: true, name: true, location: true, phone: true },
     orderBy: { name: "asc" },
   });
 
   const page = Math.max(1, Number(sp?.page) || 1);
   const totalPages = Math.max(1, Math.ceil(clients.length / PAGE_SIZE));
   const pageClients = clients.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // One shared definition of what a client owes — see lib/outstanding.ts.
+  // This page used to compute `ordered - paid` inline, counting only
+  // order-linked payments, so it omitted delivery add-ons and returns and
+  // reported a client as owing money they had already paid as an advance.
+  // Only the clients on THIS page are aggregated, rather than every order of
+  // every client being loaded to add up two numbers.
+  const dues = await outstandingByClient(pageClients.map((c) => c.id));
 
   return (
     <>
@@ -89,21 +93,7 @@ export default async function ClientsPage({
       ) : (
         <div className="grid sm:grid-cols-2 gap-3">
           {pageClients.map((c) => {
-            const ordered = c.orders.reduce(
-              (s, o) =>
-                s +
-                o.items.reduce((x, i) => x + i.total, 0) +
-                o.slabItems.reduce((x, i) => x + i.total, 0),
-              0
-            );
-            const paid = c.orders.reduce(
-              (s, o) => s + o.payments.reduce((x, p) => x + p.amount, 0),
-              0
-            );
-            const due = Math.max(0, ordered - paid);
-            const openOrders = c.orders.filter(
-              (o) => o.status !== "complete" && o.status !== "cancelled"
-            ).length;
+            const due = dues.get(c.id);
             return (
               <Link
                 key={c.id}
@@ -117,9 +107,21 @@ export default async function ClientsPage({
                     {c.location ?? "-"} {c.phone ? `· ${c.phone}` : ""}
                   </div>
                   <div className="flex gap-1.5 mt-1.5">
-                    <Pill tone="slate">{c.orders.length} orders</Pill>
-                    {openOrders > 0 && <Pill tone="blue">{openOrders} active</Pill>}
-                    {due > 0 && <Pill tone="red">{formatINR(due, { compact: true })} due</Pill>}
+                    <Pill tone="slate">{due?.orderCount ?? 0} orders</Pill>
+                    {(due?.openOrders ?? 0) > 0 && (
+                      <Pill tone="blue">{due!.openOrders} active</Pill>
+                    )}
+                    {(due?.debt ?? 0) > 0 && (
+                      <Pill tone="red">
+                        {formatINR(due!.debt, { compact: true })} due
+                      </Pill>
+                    )}
+                    {/* An overpayment is shown rather than clamped to zero. */}
+                    {(due?.credit ?? 0) > 0 && (
+                      <Pill tone="success">
+                        {formatINR(due!.credit, { compact: true })} credit
+                      </Pill>
+                    )}
                   </div>
                 </div>
                 <Icon.Chevron size={16} color="#94A3B8" />

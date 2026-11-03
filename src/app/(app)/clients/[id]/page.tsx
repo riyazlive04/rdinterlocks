@@ -10,6 +10,7 @@ import { PaymentForm } from "./payment-form";
 import { DeleteOrder } from "./delete-order";
 import { DeleteCharge } from "./delete-charge";
 import { recordPayment } from "../actions";
+import { clientOutstanding } from "@/lib/outstanding";
 
 export default async function ClientDetailPage({
   params,
@@ -59,9 +60,12 @@ export default async function ClientDetailPage({
       refunded += d.returns.reduce((s, r) => s + r.refundAmount, 0);
     }
   }
-  // Paid = every payment recorded for the client (order payments + advances).
-  const paid = client.payments.reduce((s, p) => s + p.amount, 0);
-  const balance = ordered + addOns - refunded - paid;
+  // Billed, paid and the balance all come from lib/outstanding.ts, the one
+  // definition this page and the clients list now share. They used to carry
+  // different formulas and disagreed about the same customer.
+  const due = await clientOutstanding(id);
+  const paid = due?.paid ?? 0;
+  const balance = due?.balance ?? 0;
 
   // Transport + add-on charges auto-created from the loading screen for this
   // customer (shifting, lintel slab, cement, etc.). Shown here so the extras
@@ -150,15 +154,25 @@ export default async function ClientDetailPage({
         </Card>
         <Card padding="tight" className={balance > 0 ? "border-2 border-brand-red/30" : ""}>
           <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-            Balance due
+            {balance < 0 ? "In credit" : "Balance due"}
           </div>
           <div
             className={`num display text-lg font-bold mt-0.5 ${
               balance > 0 ? "text-brand-red" : "text-emerald-700"
             }`}
           >
-            {formatINR(Math.max(0, balance))}
+            {/* Signed, not clamped: Math.max(0, balance) hid a genuine
+                overpayment from the only people who could refund it. */}
+            {formatINR(Math.abs(balance))}
           </div>
+          {due && due.debt > 0 && due.oldestUnpaidAt && (
+            <div className="text-[10px] text-slate-500 mt-0.5">
+              oldest unpaid {due.oldestUnpaidDays}d ·{" "}
+              <Link href="/collections" className="underline hover:text-ink">
+                collections
+              </Link>
+            </div>
+          )}
         </Card>
       </div>
 

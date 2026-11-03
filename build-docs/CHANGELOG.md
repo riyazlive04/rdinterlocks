@@ -109,3 +109,34 @@ absent entirely — heading and all.
   the feature doc and pinned by NAV-04.
 - An item filed under no group falls to the footer rather than vanishing;
   NAV-07 asserts nothing is actually unfiled.
+
+### Outstanding balance and collections — phase 7
+Step 10 of the order-to-cash spine: a part payment was recorded and approved,
+and then nothing tracked or chased the remainder.
+
+`/collections` lists who owes money, longest overdue first, aged 0-30 /
+31-60 / 60+ by order date with a reconciling totals row. Gated on `revenue`,
+no new access area.
+
+**Three inconsistent balance formulas were already live and disagreed about
+the same client.** Finding them was the real work; the queue is built on the
+one definition that replaced them (`src/lib/outstanding.ts`).
+
+- `clients/page.tsx` used `ordered − paid` counting only order-linked
+  payments, so it omitted delivery add-ons and returns and reported a client
+  as owing money they had already paid as an advance.
+- `clients/[id]/page.tsx` used the fuller formula, so list and detail showed
+  different dues for one customer. Neither was labelled an approximation.
+- **`dashboard/owner-panel.tsx` was the worst:** it summed the due over
+  `pendingOrders`, which is `take: 5`. The owner's headline "Due from clients"
+  was the balance on the five most recent open orders, not the total, and
+  understated receivables with nothing on screen to say so.
+
+Also: ageing is FIFO over orders (money settles the oldest bill), the buckets
+always sum to the balance, and an overpayment is now shown as a credit instead
+of being hidden behind `Math.max(0, balance)`. The clients list no longer
+loads every order, item, delivery and payment of 50 clients to add up two
+numbers — six aggregates serve any number of clients. One behaviour change
+worth naming: the "N orders" pill no longer counts cancelled orders.
+
+Tests: scripts/e2e/run-collections.ts, 73/73.
