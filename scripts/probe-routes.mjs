@@ -79,6 +79,9 @@ const routes = [
   "/fulfilment",
   "/collections",
   "/die",
+  // Came in with main: the AVM vendor-money screen and the sales register.
+  "/avm",
+  "/clients/register",
   "/tasks",
   "/leads/board",
   "/quotations/review",

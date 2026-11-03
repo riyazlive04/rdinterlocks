@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:unit": "tsx scripts/e2e/run-nav.ts && tsx scripts/e2e/run-offline.ts",
+    "test:unit": "tsx scripts/e2e/run-nav.ts && tsx scripts/e2e/run-offline.ts && tsx scripts/e2e/run-order-status.ts",
     "test:db": "tsx scripts/e2e/run-pricing.ts && tsx scripts/e2e/run-rbac.ts && tsx scripts/e2e/run-actions.ts && tsx scripts/e2e/run-task-extensions.ts && tsx scripts/e2e/run-collections.ts && tsx scripts/e2e/run-allocation.ts && tsx scripts/e2e/run-die.ts && tsx scripts/e2e/run-permissions.ts && tsx scripts/e2e/run-db.ts",
     "test:pdf": "tsx scripts/e2e/run-pdf.ts",
     "test": "npm run typecheck && npm run lint && npm run test:unit && npm run test:db",
@@ -22,8 +22,13 @@
     "cron:tick": "node scripts/run-tick.mjs",
     "cron:sweep": "node scripts/run-sweep.mjs",
     "db:zones": "tsx prisma/seed-delivery-zones.ts",
+    "db:quote-settings": "tsx prisma/seed-quote-settings.ts",
+    "db:upgrade": "tsx prisma/upgrade.ts",
+    "docs:flow": "node scripts/flow-diagram.mjs",
+    "db:stock-check": "tsx prisma/reconcile-stock.ts",
+    "db:check": "tsx prisma/check-schema.ts",
     "db:prices": "tsx prisma/seed-brick-prices.ts",
-    "db:quote-settings": "tsx prisma/seed-quote-settings.ts"
+    "db:prices-from-orders": "tsx prisma/refresh-price-matrix.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

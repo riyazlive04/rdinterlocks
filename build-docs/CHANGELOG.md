@@ -485,3 +485,66 @@ failures, exit 0**. Verified live over HTTP: an unrelated telecaller gets 404
 on a valid attachment id, a supervisor gets 404 on another telecaller's file,
 anonymous gets 401, and a telecaller's page contains neither the note nor the
 filename from a task that is not theirs.
+
+## merge(main): bring 21 commits of `main` onto this branch
+
+This branch was cut from a base **21 commits behind `origin/main`** and never
+rebased. `main` had meanwhile gained the loading-billing work, the sales
+register, AVM vendor money, order-linked deliveries and "3-state statuses".
+Merging conflicted in **23 files**.
+
+How each side won, and why:
+
+- **Dies** — both branches had the screen. `main` got it via `5306e06` with
+  **no authorization on any of its four server actions**; this branch's port
+  added the gates. Kept this branch's: the same model field-for-field, strictly
+  more checks, and `main` never touched those files again.
+- **Loading** — the reverse. `main` is far ahead (lintel slabs billed to the
+  customer, deliveries booked against open orders, cash taken at the lorry),
+  and this branch had accidentally reverted the lintel feature. Took `main`'s
+  screens and server actions, then **re-applied this branch's
+  `requireArea("loading")` gates**, which `main` still lacks entirely.
+- **Dashboard** — kept this branch's per-role panel router over `main`'s
+  598-line monolith, after checking panel by panel that it carries every
+  section and every smart-alert rule `main` had, plus four more.
+- **Tasks** — kept this branch's wholesale. `main`'s `not_done` status is the
+  one feature the merge drops; recorded as an open question, and nothing
+  hard-parses a status on read, so an existing row still renders.
+- **Stock helpers** — `main`'s `lib/delivery-sync.ts` is byte-identical logic
+  to what this branch had inlined in `clients/actions.ts`. Deleted the inline
+  copies in favour of the shared module.
+- **Nav** — `main`'s `/avm` route was absent from this branch and would have
+  been lost; added, filed under Move. A duplicate `mason` entry and a
+  duplicate `die` entry were dropped. `/clients/register` filed under Sell.
+- **Schema** — resolved hunk by hunk, then verified mechanically: the merged
+  schema is the exact **union of both sides' 68 models and 863 fields**, with
+  one intended rename (`Vendor.payments` → `vendorPayments`).
+
+### fix(order-status): one vocabulary, after the merge produced two
+
+The merge's only real bug, and **a green test run did not see it.**
+
+`Order.status` was `open | partial | complete` on this branch and
+`upcoming | active | completed` on `main`, which had also changed the column
+DEFAULT to `active`. Both sets of literals ended up in one codebase and all
+1,219 assertions still passed, because every suite seeds its own vocabulary
+and never meets the other's.
+
+What the owner would have seen: the dashboard's **"Pending orders" panel
+empty**, with no error anywhere — it queried `in: ["open", "partial"]`, which
+a row defaulting to `active` never matches. Also a completed order counted as
+open beside "Due from clients", the "Part delivered" pill never shown, and a
+completed order's fulfilment stage no longer fixed.
+
+`lib/order-status.ts` is now the single source: `OPEN_ORDER_STATUSES`,
+`CLOSED_ORDER_STATUSES`, `isOrderOpen()`. Both lists carry the **legacy
+spellings as well as the canonical ones** — the merge changes code, not rows,
+and the historical orders are the ones most likely to be chased. Only
+canonical values are ever written, and `OS-05` fails if that ever stops being
+true. Legacy `complete` counts as closed on purpose: a finished order read as
+open reappears in the queue as work somebody owes, which is the louder error.
+
+Tests: `run-order-status.ts` **35/35**, wired into `npm run test:unit`.
+`npm test` **1,254 assertions, 0 failures, exit 0**. Merged schema pushes
+cleanly to a throwaway database. `probe-routes.mjs`: **all 60 routes 200** as
+the owner, including the two `main` added.

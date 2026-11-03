@@ -75,6 +75,15 @@ export const primaryNav: NavItem[] = [
     group: "sell",
   },
   {
+    id: "register",
+    label: "Sales register",
+    href: "/clients/register",
+    icon: "Receipt",
+    matches: ["/clients/register"],
+    area: "sales",
+    group: "sell",
+  },
+  {
     id: "sales",
     label: "Clients & Sales",
     href: "/clients",
@@ -105,6 +114,15 @@ export const primaryNav: NavItem[] = [
     icon: "Hammer",
     matches: ["/mason"],
     group: "make",
+  },
+  {
+    id: "avm",
+    label: "AVM advance & rent",
+    href: "/avm",
+    icon: "Cash",
+    matches: ["/avm"],
+    area: "tipper",
+    group: "move",
   },
   {
     id: "loading",
@@ -285,6 +303,9 @@ export const primaryNav: NavItem[] = [
     icon: "Settings",
     matches: ["/settings"],
     group: "admin",
+    // A manager sees Settings too, but the hub shows them only the Data
+    // group (hide data & backups) — every other group stays admin-only.
+    adminOrManager: true,
   },
 ];
 

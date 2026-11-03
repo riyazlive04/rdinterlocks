@@ -111,13 +111,19 @@ const telecaller = tc("NAV-03", "a telecaller sees only Sell", () => {
  * feature is defined not to make — it would leave a page they can open with
  * no link to it.
  */
-const supervisor = tc("NAV-04", "a supervisor sees Make, Move and their granted Sell item", () => {
+const supervisor = tc("NAV-04", "a supervisor sees Make, Move and their granted Sell items", () => {
   eq("groups", groupKeys("supervisor"), ["sell", "make", "move"]);
   const nav = groupedNav(primaryNav, userFor("supervisor"));
   const byKey = new Map(nav.groups.map((g) => [g.key, g.items]));
-  eq("Sell is Clients & Sales alone", ids(byKey.get("sell")!), ["sales"]);
+  // `register` (area sales) and `avm` (area tipper) joined these two
+  // groups when main was merged in. They are listed here rather than
+  // filtered out BY THE RULE THIS TEST RECORDS above: a supervisor holds
+  // `sales` and `tipper`, so they can already open /clients/register and
+  // /avm, and leaving them out of the menu would be the one thing this
+  // feature is defined not to do — a reachable page with no link to it.
+  eq("Sell is Clients & Sales plus the register", ids(byKey.get("sell")!), ["register", "sales"]);
   eq("Make", ids(byKey.get("make")!), ["day", "die", "fulfilment", "loading", "mason", "production"]);
-  eq("Move", ids(byKey.get("move")!), ["deliveries", "tipper"]);
+  eq("Move", ids(byKey.get("move")!), ["avm", "deliveries", "tipper"]);
   ok("no Money heading", !byKey.has("money"));
   ok("no Admin heading", !byKey.has("admin"));
   ok("vehicles stays hidden (not granted)", !ids(byKey.get("move")!).includes("vehicles"));

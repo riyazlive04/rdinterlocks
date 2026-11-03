@@ -11,8 +11,20 @@ type WorkerOption = { type: WorkerType; id: string; name: string };
 type Mode = "loading" | "unloading" | "both";
 type Dir = "in" | "out";
 
-type Crew = { workers: Array<{ type: WorkerType; id: string }>; ratePerBrick: number };
-type ClientOption = { id: string; name: string; location?: string };
+type Crew = {
+  workers: Array<{ type: WorkerType; id: string }>;
+  ratePerBrick: number;
+};
+type ClientOption = { id: string; name: string; location?: string; advance: number };
+type OrderOption = {
+  id: string;
+  clientId: string;
+  date: string;
+  ordered: number;
+  delivered: number;
+  pending: number;
+  sizes: string[];
+};
 type TipperOption = { id: string; name: string; ownership: string };
 type VendorOption = { id: string; name: string };
 type ChargeLine = {
@@ -23,12 +35,20 @@ type ChargeLine = {
   amount: number;
   vendorId?: string;
 };
+type SizeLine = { brickSizeId: string; brickCount: number };
 type Sub = {
   date: string;
-  brickSizeId?: string;
   clientId?: string;
   vehicleRequested?: string;
-  brickCount: number;
+  items: Array<{ brickSizeId?: string; brickCount: number }>;
+  slabCount: number;
+  // What the customer pays per beam. Beams are sold, not crew-paid.
+  slabRate: number;
+  orderId?: string;
+  saleRate?: number;
+  constructionTypeId?: string;
+  payNow?: number;
+  payNowMethod?: "cash" | "gpay" | "bank" | "upi" | "cheque";
   loading?: Crew;
   unloading?: Crew;
   tipperId?: string;
@@ -36,23 +56,34 @@ type Sub = {
   charges: ChargeLine[];
 };
 
+// Sentinel for "deliberately no customer", so a blank select can be told apart
+// from a field the user simply never touched.
+const INTERNAL = "__internal__";
+
 const CHARGE_PRESETS: Array<{ name: string; unit: string }> = [
-  { name: "Shifting charge", unit: "trip" },
-  { name: "Lintel slab", unit: "pcs" },
+  { name: "Shifting charges", unit: "trip" },
+  { name: "Lintel Beam", unit: "pcs" },
   { name: "Cement", unit: "bag" },
 ];
 
 export function LoadingMultiForm({
   workers,
   sizes,
+  types,
+  priceFor,
   clients,
+  orders,
   tippers,
   vendors,
   onSubmit,
 }: {
   workers: { loaders: WorkerOption[]; operators: WorkerOption[]; employees: WorkerOption[] };
   sizes: Array<{ id: string; label: string }>;
+  types: Array<{ id: string; label: string }>;
+  // Sell price per (size × construction type) so the rate fills itself in.
+  priceFor: Record<string, number>;
   clients: ClientOption[];
+  orders: OrderOption[];
   tippers: TipperOption[];
   vendors: VendorOption[];
   onSubmit: (d: Sub) => Promise<void>;
@@ -61,10 +92,33 @@ export function LoadingMultiForm({
   const keyOf = (w: WorkerOption) => `${w.type}:${w.id}`;
 
   const [date, setDate] = useState(formatISODate(new Date()));
-  const [brickSizeId, setBrickSizeId] = useState(sizes[0]?.id ?? "");
+  // One line per brick size on the trip, so a lorry carrying 6" AND 8" is a
+  // single entry instead of two. Lintel beams ride along on the same entry.
+  const [lines, setLines] = useState<SizeLine[]>([
+    { brickSizeId: sizes[0]?.id ?? "", brickCount: 1000 },
+  ]);
+  const [slabCount, setSlabCount] = useState<number>(0);
+  // Beams are billed to the customer, not paid to the crew, so the rate
+  // belongs to the trip rather than to either crew.
+  const [slabRate, setSlabRate] = useState<number>(0);
   const [clientId, setClientId] = useState<string>("");
+  const [orderId, setOrderId] = useState<string>("");
+  // Rate agreed with the customer when the lorry is loaded. The telecaller only
+  // took a name and an advance, so this is where the sale actually gets priced.
+  const [saleRate, setSaleRate] = useState<number>(0);
+  const [saleTypeId, setSaleTypeId] = useState<string>(types[0]?.id ?? "");
+  // The matrix already knows what this size × type sells for, so offer it and
+  // let the manager overwrite it if the customer agreed something else.
+  const matrixRate = (sizeId: string, typeId: string) => priceFor[`${sizeId}:${typeId}`] ?? 0;
+  const fillRate = (typeId: string) => {
+    const sizeId = lines.find((l) => l.brickCount > 0)?.brickSizeId || lines[0]?.brickSizeId || "";
+    const r = matrixRate(sizeId, typeId);
+    if (r > 0) setSaleRate(r);
+  };
+  // Cash handed over at the lorry, on top of anything already advanced.
+  const [payNow, setPayNow] = useState<number>(0);
+  const [payNowMethod, setPayNowMethod] = useState<"cash" | "gpay" | "bank" | "upi" | "cheque">("cash");
   const [vehicleRequested, setVehicleRequested] = useState<string>("");
-  const [brickCount, setBrickCount] = useState<number>(1000);
 
   const [tipperId, setTipperId] = useState<string>("");
   const [tipperCharge, setTipperCharge] = useState<number>(0);
@@ -79,14 +133,35 @@ export function LoadingMultiForm({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const unit = "bricks";
-  const unitOne = "brick";
-
   const showLoad = mode !== "unloading";
   const showUnload = mode !== "loading";
 
+  // Every crew is paid on the whole trip, so the split tables and the salary
+  // work off the combined count across all size lines, plus the slabs.
+  const brickCount = lines.reduce((s, l) => s + (l.brickCount || 0), 0);
+  const hasSlabs = slabCount > 0;
+  const hasBricks = brickCount > 0;
+
+  const addLine = () =>
+    setLines((l) => [
+      ...l,
+      {
+        brickSizeId: sizes.find((s) => !l.some((x) => x.brickSizeId === s.id))?.id ?? "",
+        brickCount: 0,
+      },
+    ]);
+  const updateLine = (i: number, patch: Partial<SizeLine>) =>
+    setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const removeLine = (i: number) => setLines((l) => l.filter((_, idx) => idx !== i));
+
   const tipper = tippers.find((t) => t.id === tipperId);
   const tipperIsOwn = tipper?.ownership === "own";
+
+  const client = clients.find((c) => c.id === clientId);
+  const priorAdvance = client?.advance ?? 0;
+  const saleValue = Math.round(brickCount * (saleRate || 0));
+  const clientOrders = orders.filter((o) => o.clientId === clientId);
+  const selectedOrder = orders.find((o) => o.id === orderId);
 
   const changeMode = (m: Mode) => {
     setMode(m);
@@ -170,35 +245,53 @@ export function LoadingMultiForm({
     );
   };
 
+  // Only the bricks earn a wage. Beams are still split across the crew and
+  // shown, because they did carry them, but they are billed to the customer
+  // instead of paid out — so they add nothing to the Salary column.
+  const crewTotal = (rate: number) => Math.round(brickCount * (rate || 0));
+
   const splitTable = (sel: Set<string>, rate: number) => {
     const sw = workersFor(sel);
     if (sw.length === 0) return null;
-    const split = distributeInt(brickCount || 0, sw.length);
-    const total = Math.round((brickCount || 0) * (rate || 0));
+    const bricksSplit = distributeInt(brickCount || 0, sw.length);
+    const slabsSplit = distributeInt(slabCount || 0, sw.length);
     return (
       <div className="mt-3 bg-slate-50 rounded-xl overflow-hidden">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="text-slate-500 text-[10px] uppercase tracking-wider">
               <th className="text-left px-3 py-2">Worker</th>
-              <th className="text-right px-3 py-2 capitalize">{unit}</th>
+              {hasBricks && <th className="text-right px-3 py-2">Bricks</th>}
+              {hasSlabs && <th className="text-right px-3 py-2">Slabs</th>}
               <th className="text-right px-3 py-2">Salary</th>
             </tr>
           </thead>
           <tbody>
-            {sw.map((w, i) => (
-              <tr key={keyOf(w)} className="border-t border-slate-200">
-                <td className="px-3 py-2 font-semibold text-ink">{w.name}</td>
-                <td className="px-3 py-2 text-right num">{formatNumber(split[i] ?? 0)}</td>
-                <td className="px-3 py-2 text-right num font-semibold">
-                  {formatINR(Math.round((split[i] ?? 0) * rate))}
-                </td>
-              </tr>
-            ))}
+            {sw.map((w, i) => {
+              const b = bricksSplit[i] ?? 0;
+              const s = slabsSplit[i] ?? 0;
+              return (
+                <tr key={keyOf(w)} className="border-t border-slate-200">
+                  <td className="px-3 py-2 font-semibold text-ink">{w.name}</td>
+                  {hasBricks && <td className="px-3 py-2 text-right num">{formatNumber(b)}</td>}
+                  {hasSlabs && <td className="px-3 py-2 text-right num">{formatNumber(s)}</td>}
+                  <td className="px-3 py-2 text-right num font-semibold">
+                    {formatINR(Math.round(b * (rate || 0)))}
+                  </td>
+                </tr>
+              );
+            })}
             <tr className="border-t-2 border-slate-300 bg-white">
               <td className="px-3 py-2 font-bold">Total</td>
-              <td className="px-3 py-2 text-right num font-bold">{formatNumber(brickCount || 0)}</td>
-              <td className="px-3 py-2 text-right num font-bold">{formatINR(total)}</td>
+              {hasBricks && (
+                <td className="px-3 py-2 text-right num font-bold">{formatNumber(brickCount)}</td>
+              )}
+              {hasSlabs && (
+                <td className="px-3 py-2 text-right num font-bold">{formatNumber(slabCount)}</td>
+              )}
+              <td className="px-3 py-2 text-right num font-bold">
+                {formatINR(crewTotal(rate))}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -207,18 +300,43 @@ export function LoadingMultiForm({
   };
 
   const grandTotal = useMemo(() => {
-    const load = showLoad ? Math.round((brickCount || 0) * (loadRate || 0)) : 0;
-    const unload = showUnload ? Math.round((brickCount || 0) * (unloadRate || 0)) : 0;
+    const load = showLoad ? Math.round(brickCount * (loadRate || 0)) : 0;
+    const unload = showUnload ? Math.round(brickCount * (unloadRate || 0)) : 0;
     return load + unload;
   }, [brickCount, loadRate, unloadRate, showLoad, showUnload]);
 
   const submit = () => {
     setError(null);
-    if (brickCount < 0) return setError("Brick count can't be negative");
+    if (brickCount <= 0 && slabCount <= 0) {
+      return setError("Enter the bricks, the lintel beams, or both");
+    }
+    const seen = new Set<string>();
+    for (const l of lines.filter((x) => x.brickCount > 0)) {
+      const key = l.brickSizeId || "mixed";
+      if (seen.has(key)) return setError("Each brick size can only be listed once");
+      seen.add(key);
+    }
+    if (!clientId) {
+      return setError("Choose the customer, or pick 'No customer' if it was an internal move");
+    }
     if (showLoad && loadSel.size === 0) return setError("Pick at least one person who loaded");
-    if (showLoad && loadRate < 0) return setError("Loading rate can't be negative");
+    if (showLoad && hasBricks && loadRate <= 0) return setError("Loading rate must be more than 0");
     if (showUnload && unloadSel.size === 0) return setError("Pick at least one person who unloaded");
-    if (showUnload && unloadRate < 0) return setError("Unloading rate can't be negative");
+    if (showUnload && hasBricks && unloadRate <= 0) {
+      return setError("Unloading rate must be more than 0");
+    }
+    // Beams go on the customer's bill, so they need a price for the same
+    // reason a brick load does — a blank rate is an unbilled beam.
+    if (hasSlabs && clientId && clientId !== INTERNAL && slabRate <= 0) {
+      return setError("Enter the rate per beam so the lintel beams are billed");
+    }
+    // Every load for a real customer has to be billed. Leaving the rate blank
+    // is what left 95 loads and 26,698 bricks sold but never invoiced.
+    if (clientId && clientId !== INTERNAL && !orderId && hasBricks && saleRate <= 0) {
+      return setError(
+        "Enter the rate per brick so this load is billed - or choose 'No customer' if it is an internal move"
+      );
+    }
     if (tipperId && tipperCharge < 0) return setError("Tipper charge can't be negative");
     for (const c of charges) {
       if (!c.name.trim()) return setError("Every charge needs a name (or remove the empty line)");
@@ -227,15 +345,29 @@ export function LoadingMultiForm({
       try {
         await onSubmit({
           date,
-          brickSizeId: brickSizeId || undefined,
-          clientId: clientId || undefined,
+          clientId: clientId && clientId !== INTERNAL ? clientId : undefined,
           vehicleRequested: vehicleRequested.trim() || undefined,
-          brickCount,
+          items: lines
+            .filter((l) => l.brickCount > 0)
+            .map((l) => ({ brickSizeId: l.brickSizeId || undefined, brickCount: l.brickCount })),
+          slabCount,
+          slabRate: hasSlabs && slabRate > 0 ? slabRate : 0,
+          orderId: orderId || undefined,
+          saleRate: !orderId && saleRate > 0 ? saleRate : 0,
+          constructionTypeId: !orderId ? saleTypeId || undefined : undefined,
+          payNow: payNow > 0 ? payNow : 0,
+          payNowMethod,
           loading: showLoad
-            ? { workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: loadRate }
+            ? {
+                workers: workersFor(loadSel).map((w) => ({ type: w.type, id: w.id })),
+                ratePerBrick: loadRate,
+              }
             : undefined,
           unloading: showUnload
-            ? { workers: workersFor(unloadSel).map((w) => ({ type: w.type, id: w.id })), ratePerBrick: unloadRate }
+            ? {
+                workers: workersFor(unloadSel).map((w) => ({ type: w.type, id: w.id })),
+                ratePerBrick: unloadRate,
+              }
             : undefined,
           tipperId: tipperId || undefined,
           tipperCharge: tipperId ? tipperCharge : 0,
@@ -288,29 +420,129 @@ export function LoadingMultiForm({
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        <Field label="Brick size (optional)">
-          <Select value={brickSizeId} onChange={(e) => setBrickSizeId(e.target.value)}>
-            <option value="">- mixed -</option>
-            {sizes.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label={`Total ${unit}`} hint="0 for a slabs-only trip - bill the slabs as a charge below.">
-          <Input
-            type="number"
-            value={brickCount || ""}
-            onChange={(e) => setBrickCount(Number(e.target.value || 0))}
-          />
-        </Field>
+      </div>
+
+      {/* What went on the lorry — brick sizes and lintel beams, one entry */}
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
+            What went on the lorry
+          </div>
+          <button
+            type="button"
+            onClick={addLine}
+            className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+          >
+            + Add another size
+          </button>
+        </div>
+        <div className="space-y-2">
+          {lines.map((l, i) => (
+            <div key={i} className="grid grid-cols-12 gap-2 items-end bg-slate-50 rounded-xl p-2.5">
+              <div className="col-span-6 sm:col-span-6">
+                <Field label="Brick size">
+                  <Select
+                    value={l.brickSizeId}
+                    onChange={(e) => updateLine(i, { brickSizeId: e.target.value })}
+                  >
+                    <option value="">- mixed -</option>
+                    {sizes.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <div className="col-span-4 sm:col-span-5">
+                <Field label="Bricks">
+                  <Input
+                    type="number"
+                    value={l.brickCount || ""}
+                    onChange={(e) => updateLine(i, { brickCount: Number(e.target.value || 0) })}
+                  />
+                </Field>
+              </div>
+              <div className="col-span-2 sm:col-span-1 flex justify-end">
+                {lines.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeLine(i)}
+                    className="w-9 h-9 rounded-md hover:bg-slate-200 inline-flex items-center justify-center text-slate-500"
+                    title="Remove this size"
+                  >
+                    <Icon.Trash size={15} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Lintel beams travel with the bricks — same trip, same entry. */}
+          <div className="grid grid-cols-12 gap-2 items-end bg-amber-50 rounded-xl p-2.5 border border-amber-200">
+            <div className="col-span-6 sm:col-span-6">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-800 mb-1.5">
+                Lintel beams
+              </div>
+              <div className="text-[11px] text-amber-800/80">
+                On the same lorry - leave 0 if none
+              </div>
+            </div>
+            <div className="col-span-6 sm:col-span-5 grid grid-cols-2 gap-2">
+              <Field label="Beams">
+                <Input
+                  type="number"
+                  value={slabCount || ""}
+                  onChange={(e) => setSlabCount(Number(e.target.value || 0))}
+                />
+              </Field>
+              {hasSlabs && (
+                <Field label="Rate ₹/beam" hint="Charged to the customer">
+                  <Input
+                    type="number"
+                    step="0.5"
+                    value={slabRate || ""}
+                    onChange={(e) => setSlabRate(Number(e.target.value || 0))}
+                  />
+                </Field>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="text-[11px] text-slate-500 mt-1.5">
+          This trip: <span className="num font-bold text-ink">{formatNumber(brickCount)}</span>{" "}
+          bricks
+          {hasSlabs && (
+            <>
+              {" "}
+              + <span className="num font-bold text-ink">{formatNumber(slabCount)}</span> slabs
+            </>
+          )}
+          . Each size and the slabs are saved separately, so the reports still show 6&quot;, 8&quot;
+          and slabs apart.
+        </div>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3 mt-3">
-        <Field label="Customer (optional)">
-          <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
-            <option value="">- none -</option>
+        {/* Not optional any more: a blank customer used to be a silent skip,
+            which made loads impossible to trace back. Internal moves are still
+            allowed, but they have to be chosen on purpose. */}
+        <Field label="Customer">
+          <Select
+            value={clientId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setClientId(next);
+              // Pre-pick the order when the customer has exactly one open —
+              // the common case, and the office shouldn't have to think.
+              const theirs = orders.filter((o) => o.clientId === next);
+              const one = theirs.length === 1 ? theirs[0].id : "";
+              setOrderId(one);
+              if (!one && next && next !== INTERNAL && saleRate <= 0) fillRate(saleTypeId);
+            }}
+          >
+            <option value="">- choose the customer -</option>
+            <option value={INTERNAL}>No customer (internal / yard move)</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.location ? `${c.name} — ${c.location}` : c.name}
@@ -327,6 +559,177 @@ export function LoadingMultiForm({
           />
         </Field>
       </div>
+
+      {/* Deliver against an order — what makes the customer's balance move */}
+      {clientId && clientId !== INTERNAL && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <div className="text-[12px] font-bold uppercase tracking-wider text-ink mb-2">
+            The sale
+          </div>
+
+          {clientOrders.length > 0 && (
+            <Field label="Deliver against an existing order">
+              <Select value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+                <option value="">- new sale, priced below -</option>
+                {clientOrders.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {new Date(o.date).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                    {o.sizes.length ? ` · ${Array.from(new Set(o.sizes)).join(", ")}` : ""} ·{" "}
+                    {formatNumber(o.pending)} of {formatNumber(o.ordered)} still to deliver
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+
+          {/* No order picked: price the load here and the sale is created. */}
+          {!orderId && (
+            <div className="grid sm:grid-cols-3 gap-3 mt-3">
+              <Field label="Rate ₹ / brick" hint="What the customer pays">
+                <Input
+                  type="number"
+                  step="0.5"
+                  value={saleRate || ""}
+                  onChange={(e) => setSaleRate(Number(e.target.value || 0))}
+                />
+              </Field>
+              <Field label="Room / Compound">
+                <Select
+                  value={saleTypeId}
+                  onChange={(e) => {
+                    setSaleTypeId(e.target.value);
+                    fillRate(e.target.value);
+                  }}
+                >
+                  {types.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="flex items-end">
+                <div className="text-[12px] text-slate-600">
+                  {saleRate > 0 && hasBricks ? (
+                    <>
+                      Sale value{" "}
+                      <span className="num font-bold text-ink">
+                        {formatINR(Math.round(brickCount * saleRate))}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-400">Enter a rate to bill this load</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Money at the lorry: what was already advanced, what is handed over
+              now, and what is still owed. */}
+          {(saleRate > 0 || orderId) && (
+            <div className="grid sm:grid-cols-3 gap-3 mt-3">
+              <Field label="Received now ₹" hint="Cash taken at the lorry">
+                <Input
+                  type="number"
+                  value={payNow || ""}
+                  onChange={(e) => setPayNow(Number(e.target.value || 0))}
+                />
+              </Field>
+              <Field label="Paid by">
+                <Select
+                  value={payNowMethod}
+                  onChange={(e) =>
+                    setPayNowMethod(e.target.value as "cash" | "gpay" | "bank" | "upi" | "cheque")
+                  }
+                >
+                  <option value="cash">Cash</option>
+                  <option value="gpay">GPay</option>
+                  <option value="upi">UPI</option>
+                  <option value="bank">Bank</option>
+                  <option value="cheque">Cheque</option>
+                </Select>
+              </Field>
+              <div className="flex items-end">
+                {priorAdvance > 0 && (
+                  <div className="text-[11px] text-slate-600">
+                    Advance already paid{" "}
+                    <span className="num font-bold text-emerald-700">
+                      {formatINR(priorAdvance)}
+                    </span>
+                    <div className="text-slate-400">attached automatically</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!orderId && saleRate > 0 && hasBricks && (
+            <div className="mt-2 bg-slate-50 rounded-xl p-2.5 text-[12px]">
+              <div className="flex justify-between">
+                <span>{formatNumber(brickCount)} bricks × ₹{saleRate}</span>
+                <span className="num font-bold text-ink">{formatINR(saleValue)}</span>
+              </div>
+              {priorAdvance > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>less advance already paid</span>
+                  <span className="num">−{formatINR(Math.min(priorAdvance, saleValue))}</span>
+                </div>
+              )}
+              {payNow > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>less received now</span>
+                  <span className="num">−{formatINR(payNow)}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-slate-200 mt-1.5 pt-1.5 font-bold">
+                <span>Balance</span>
+                <span className="num text-brand-red">
+                  {formatINR(
+                    Math.max(0, saleValue - Math.min(priorAdvance, saleValue) - (payNow || 0))
+                  )}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-500 mt-1">
+                An order is created for this customer, already delivered, with this money set
+                against it.
+              </div>
+            </div>
+          )}
+          {!orderId && saleRate <= 0 && (
+            <div className="text-[11px] mt-1.5 text-brand-red font-semibold">
+              A rate is needed - the load can&apos;t be saved unbilled for a customer.
+            </div>
+          )}
+
+          {selectedOrder && hasBricks && (
+            <div
+              className={clsx(
+                "text-[11px] mt-1.5 font-semibold",
+                brickCount > selectedOrder.pending ? "text-amber-700" : "text-emerald-700"
+              )}
+            >
+              {brickCount > selectedOrder.pending
+                ? `${formatNumber(brickCount)} bricks is more than the ${formatNumber(
+                    selectedOrder.pending
+                  )} still owed on this order - it will be over-delivered.`
+                : `${formatNumber(brickCount)} bricks will be booked as delivered. ${formatNumber(
+                    selectedOrder.pending - brickCount
+                  )} left after this.`}
+            </div>
+          )}
+          {hasSlabs && (
+            <div className="text-[11px] mt-1 text-slate-500">
+              The {formatNumber(slabCount)} lintel beams are billed to the customer as a charge on
+              this load, not delivered as bricks and not paid to the crew.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Transport: tipper + shifting charge */}
       <div className="mt-4 pt-3 border-t border-slate-100">
@@ -345,7 +748,7 @@ export function LoadingMultiForm({
             </Select>
           </Field>
           {tipperId && (
-            <Field label="Shifting / rent charge (₹)">
+            <Field label="Shifting / rent charge (₹)" hint="Enter the amount once">
               <Input
                 type="number"
                 value={tipperCharge || ""}
@@ -355,20 +758,25 @@ export function LoadingMultiForm({
           )}
         </div>
         {tipperId && tipperCharge > 0 && (
-          <div
-            className={clsx(
-              "text-[11px] mt-1 font-semibold",
-              tipperIsOwn ? "text-emerald-700" : "text-brand-red"
+          <div className="text-[11px] mt-1 font-semibold">
+            {tipperIsOwn ? (
+              <span className="text-slate-600">
+                Own RD tipper → <span className="text-emerald-700">+{formatINR(tipperCharge)}</span>{" "}
+                income on the tipper and{" "}
+                <span className="text-brand-red">−{formatINR(tipperCharge)}</span> transport expense,
+                both recorded automatically.
+              </span>
+            ) : (
+              <span className="text-slate-600">
+                Rented tipper → <span className="text-brand-red">−{formatINR(tipperCharge)}</span>{" "}
+                expense recorded automatically. Pay it from the AVM page (advance / tipper due).
+              </span>
             )}
-          >
-            {tipperIsOwn
-              ? `RD tipper → +${formatINR(tipperCharge)} income`
-              : `Vendor tipper → −${formatINR(tipperCharge)} expense`}
           </div>
         )}
       </div>
 
-      {/* Add-on charges (shifting extras, lintel slab, cement, custom) */}
+      {/* Add-on charges (shifting extras, lintel beam, cement, custom) */}
       <div className="mt-4 pt-3 border-t border-slate-100">
         <div className="flex items-center justify-between mb-2">
           <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
@@ -397,7 +805,7 @@ export function LoadingMultiForm({
 
         {charges.length === 0 ? (
           <div className="text-[12px] text-slate-500">
-            No extra charges. Add shifting, lintel slab, cement, etc. — mark each as sold to the
+            No extra charges. Add shifting, lintel beam, cement, etc. — mark each as sold to the
             customer (income) or bought from a vendor (expense).
           </div>
         ) : (
@@ -481,19 +889,21 @@ export function LoadingMultiForm({
 
       {showLoad && (
         <div className="mt-4 pt-3 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 gap-3">
             <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
               Loading · {loadSel.size} selected
             </div>
-            <div className="w-32">
-              <Field label={`Rate ₹/${unitOne}`}>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={loadRate}
-                  onChange={(e) => setLoadRate(Number(e.target.value || 0))}
-                />
-              </Field>
+            <div className="flex gap-2">
+              <div className="w-28">
+                <Field label="Rate ₹/brick">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={loadRate}
+                    onChange={(e) => setLoadRate(Number(e.target.value || 0))}
+                  />
+                </Field>
+              </div>
             </div>
           </div>
           {groupSelector(loadSel, toggle(setLoadSel))}
@@ -503,19 +913,21 @@ export function LoadingMultiForm({
 
       {showUnload && (
         <div className="mt-4 pt-3 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 gap-3">
             <div className="text-[12px] font-bold uppercase tracking-wider text-ink">
               Unloading · {unloadSel.size} selected
             </div>
-            <div className="w-32">
-              <Field label={`Rate ₹/${unitOne}`}>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={unloadRate}
-                  onChange={(e) => setUnloadRate(Number(e.target.value || 0))}
-                />
-              </Field>
+            <div className="flex gap-2">
+              <div className="w-28">
+                <Field label="Rate ₹/brick">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={unloadRate}
+                    onChange={(e) => setUnloadRate(Number(e.target.value || 0))}
+                  />
+                </Field>
+              </div>
             </div>
           </div>
           {mode === "both" && (

@@ -6,6 +6,7 @@ import { can } from "@/lib/access";
 import { Avatar, Card, PageHeader, Pill, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate } from "@/lib/format";
+import { orderStatusLabel, orderStatusTone } from "@/lib/order-status";
 import { PaymentForm } from "./payment-form";
 import { DeleteOrder } from "./delete-order";
 import { DeleteCharge } from "./delete-charge";
@@ -75,21 +76,61 @@ export default async function ClientDetailPage({
     include: { vendor: true },
     orderBy: { date: "desc" },
   });
-  const clientTipperRows = await prisma.loadingWork.findMany({
-    where: { clientId: id, tipperId: { not: null } },
-    select: { loadGroupId: true },
+  // Every loading/unloading row logged against this customer, so the work done
+  // for them is visible here and not only on the Loading screen.
+  const loadingRows = await prisma.loadingWork.findMany({
+    where: { clientId: id },
+    include: { brickSize: true, tipper: true },
+    orderBy: { date: "desc" },
   });
   const loadGroupIds = Array.from(
-    new Set(clientTipperRows.map((r) => r.loadGroupId).filter((x): x is string => !!x))
+    new Set(loadingRows.map((r) => r.loadGroupId).filter((x): x is string => !!x))
   );
   const transportLoads = loadGroupIds.length
     ? await prisma.tipperLoad.findMany({
-        where: { loadGroupId: { in: loadGroupIds }, rentAmount: { gt: 0 } },
+        // Zero-rent trips count too — a free run of our own truck is still a
+        // trip made for this customer.
+        where: { loadGroupId: { in: loadGroupIds } },
         include: { tipper: true },
         orderBy: { date: "desc" },
       })
     : [];
-  const hasLoadingExtras = loadingCharges.length > 0 || transportLoads.length > 0;
+
+  // One card per physical trip: the rows of a load group share a date, sizes
+  // and tipper, and each worker holds a slice of the same bricks.
+  const trips = Array.from(
+    loadingRows
+      .reduce((map, r) => {
+        const key = r.loadGroupId ?? r.id;
+        const t = map.get(key) ?? {
+          key,
+          date: r.date,
+          tipper: r.tipper?.name ?? null,
+          bricks: 0,
+          slabs: 0,
+          wages: 0,
+          sizes: new Set<string>(),
+          workers: 0,
+        };
+        // Unloading re-handles the same pieces — count them once, on loading.
+        if (r.phase !== "unloading") {
+          if (r.loadType === "lintel") t.slabs += r.brickCount;
+          else {
+            t.bricks += r.brickCount;
+            t.sizes.add(r.brickSize?.label ?? "mixed");
+          }
+        }
+        t.wages += r.totalAmount;
+        t.workers += 1;
+        if (r.date > t.date) t.date = r.date;
+        return map.set(key, t);
+      }, new Map<string, {
+        key: string; date: Date; tipper: string | null; bricks: number;
+        slabs: number; wages: number; sizes: Set<string>; workers: number;
+      }>())
+      .values()
+  ).sort((a, b) => b.date.getTime() - a.date.getTime());
+
 
   return (
     <>
@@ -225,17 +266,7 @@ export default async function ClientDetailPage({
                       </div>
                       <div className="num text-[14px] font-bold mt-0.5">{formatINR(oTotal)}</div>
                     </div>
-                    <Pill
-                      tone={
-                        o.status === "complete"
-                          ? "success"
-                          : o.status === "partial"
-                            ? "blue"
-                            : "warning"
-                      }
-                    >
-                      {o.status}
-                    </Pill>
+                    <Pill tone={orderStatusTone(o.status)}>{orderStatusLabel(o.status)}</Pill>
                   </div>
                   {(o.items.length > 0 || o.slabItems.length > 0) && (
                     <div className="bg-slate-50 rounded-lg p-2 text-[12px] mb-2">
@@ -251,7 +282,7 @@ export default async function ClientDetailPage({
                       {o.slabItems.map((it) => (
                         <div key={it.id} className="flex justify-between">
                           <span>
-                            Lintel slab {it.slabSize.label} · {formatNumber(it.quantity)} slabs
+                            Lintel beam {it.slabSize.label} · {formatNumber(it.quantity)} beams
                             {it.pricePerSlab > 0 ? ` @ ₹${it.pricePerSlab}` : ""}
                           </span>
                           <span className="num font-semibold">{formatINR(it.total)}</span>
@@ -379,7 +410,54 @@ export default async function ClientDetailPage({
             )}
           </Card>
 
-          {hasLoadingExtras && (
+          {trips.length > 0 && (
+            <Card>
+              <h3 className="text-[14px] font-bold mb-1">
+                Loaded for this customer{" "}
+                <span className="text-slate-400 font-normal">({trips.length})</span>
+              </h3>
+              <div className="text-[11px] text-slate-500 mb-2">
+                Trips logged on the Loading screen. These are the loading wages - they don&apos;t
+                change the order balance.
+              </div>
+              <div className="divide-y divide-slate-100">
+                {trips.map((t) => (
+                  <div key={t.key} className="flex justify-between items-center py-2 gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold">
+                        {t.bricks > 0 && (
+                          <>
+                            {formatNumber(t.bricks)} bricks
+                            {t.sizes.size > 0 && (
+                              <span className="text-slate-400 font-normal">
+                                {" "}
+                                · {Array.from(t.sizes).join(", ")}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {t.slabs > 0 && (
+                          <span className={t.bricks > 0 ? "text-slate-600" : ""}>
+                            {t.bricks > 0 ? " + " : ""}
+                            {formatNumber(t.slabs)} slabs
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        {formatShortDate(t.date)}
+                        {t.tipper ? ` · 🛻 ${t.tipper}` : ""} · {t.workers} worker rows
+                      </div>
+                    </div>
+                    <div className="num text-[12px] text-slate-500 whitespace-nowrap">
+                      {formatINR(t.wages)} wages
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {(transportLoads.length > 0 || loadingCharges.length > 0) && (
             <Card>
               <h3 className="text-[14px] font-bold mb-3">Transport & loading charges</h3>
               <div className="divide-y divide-slate-100">
@@ -395,14 +473,18 @@ export default async function ClientDetailPage({
                       </div>
                       <div className="text-[10px] text-slate-500">{formatShortDate(t.date)}</div>
                     </div>
-                    <div
-                      className={`num text-[13px] font-bold ${
-                        t.rentDirection === "in" ? "text-emerald-700" : "text-brand-red"
-                      }`}
-                    >
-                      {t.rentDirection === "in" ? "+" : "−"}
-                      {formatINR(t.rentAmount)}
-                    </div>
+                    {t.rentAmount > 0 ? (
+                      <div
+                        className={`num text-[13px] font-bold ${
+                          t.rentDirection === "in" ? "text-emerald-700" : "text-brand-red"
+                        }`}
+                      >
+                        {t.rentDirection === "in" ? "+" : "−"}
+                        {formatINR(t.rentAmount)}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400 whitespace-nowrap">no charge</div>
+                    )}
                   </div>
                 ))}
                 {loadingCharges.map((c) => (

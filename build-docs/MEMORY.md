@@ -85,6 +85,22 @@ start of every session. Update whenever a decision is made.
 
 ## Open questions
 
+- **`main`'s `not_done` task status was dropped by the merge (2026-11-03).**
+  `main` modelled a task as `wip | done | not_done`, where `not_done` is a
+  closed state that must carry a reason. This branch models the same
+  situation as a task that stays `open`/`wip` with a `statusReason`, and its
+  status set is `open | wip | done`. Keeping this branch's tasks screen (far
+  larger: priority, categories, steps, notes, files, recurrence) means
+  `not_done` no longer exists anywhere in the code.
+  - Nothing hard-parses a status on READ, so a production row still holding
+    `not_done` renders as "not done" rather than crashing.
+  - **Unverified:** whether any live row actually holds it. Production reads
+    were blocked by the sandbox, so this was never checked. Query:
+    `SELECT status, count(*) FROM "Task" GROUP BY status;`
+  - Decide: re-add `not_done` as a fourth status, or leave it as
+    "open with a reason".
+
+
 - ~~**Above 160 km conflicts.**~~ **Resolved by the 2026-11-03 sheet**, which
   lists both rows explicitly as separate bands: *above (160-300)* at ₹58/₹73
   and *300 kms & above* at ₹61/₹78. It was never a conflict — both were right.
@@ -164,8 +180,8 @@ start of every session. Update whenever a decision is made.
   built.** Decided, not implemented: there is no signal for "we are in
   production now". It needs a trigger (a Settings flag, or first run against
   the live database) before it can exist.
-- The branch is **7+ commits ahead of `main` with no upstream** — none of
-  this is on GitHub yet.
+- The branch is **pushed to GitHub** (`origin/feat/lead-intake-quote-review`)
+  and `main` has been fast-forwarded onto it. See "Merging main" below.
 - ~~`changePassword` changed the wrong user's password.~~ **Fixed:** it
   loaded `findFirst({ role: "admin" })`, so a manager changing "their"
   password edited the owner's row (not an escalation — they still needed the
@@ -173,3 +189,53 @@ start of every session. Update whenever a decision is made.
   said so), and it threw "No admin user found" outright if the sole owner's
   role string was `owner`. Now operates on the session user, re-read from the
   database.
+
+## Merging `main` into this branch (2026-11-03)
+
+This branch was cut from a base 21 commits behind `origin/main` and never
+rebased, so `main` meanwhile gained the loading-billing work, the sales
+register, AVM vendor money and "3-state statuses". Merging conflicted in 23
+files. The decisions worth keeping:
+
+- **`Order.status` had TWO vocabularies.** This branch used
+  `open | partial | complete | cancelled`; `main` used
+  `upcoming | active | completed | cancelled` and changed the column DEFAULT
+  to `active`. Both sets of literals ended up in one codebase and **every
+  test still passed**, because each suite seeded its own vocabulary and never
+  met the other's. The live failure was silent: the owner's "Pending orders"
+  panel queried `in: ["open", "partial"]`, which matches nothing once a row
+  defaults to `active`, so it rendered empty with no error.
+  **Resolved** by making `lib/order-status.ts` the single source:
+  `OPEN_ORDER_STATUSES` / `CLOSED_ORDER_STATUSES` / `isOrderOpen()`, each
+  carrying the LEGACY spellings as well as the canonical ones, because rows
+  written before the merge are still in the database and the merge does not
+  rewrite them. Only canonical values are ever written (`deriveOrderStatus`).
+  Legacy `complete` counts as CLOSED, deliberately: a finished order wrongly
+  read as open reappears in the fulfilment queue and the pending panel, which
+  is the louder error. Covered by `scripts/e2e/run-order-status.ts` (35
+  assertions).
+- **Dies existed on both sides.** `main` added the same screen via `5306e06`
+  with **no authorization on any of its four server actions**; this branch's
+  port added the gates. Kept this branch's version — field-for-field the same
+  model, strictly more checks. `main` never touched those files again.
+- **Loading went the other way.** `main` is far ahead there (lintel slabs,
+  order-linked deliveries, pay-at-the-lorry), and this branch had
+  accidentally reverted the lintel feature. Took `main`'s loading screens and
+  server actions, then **re-applied this branch's `requireArea("loading")`
+  gates**, which `main` still lacks entirely.
+- **Tasks**: kept this branch's version wholesale. `main`'s `not_done` status
+  is **the one feature dropped by the merge** — see Open questions.
+- `lib/delivery-sync.ts` (from `main`) is byte-identical logic to the stock
+  helpers this branch had inlined in `clients/actions.ts`; the inline copies
+  were deleted in favour of the shared module.
+- `Vendor.payments` was renamed `vendorPayments` by this branch. No code
+  reads that relation field by name, and typecheck is clean.
+
+### Consequence to be aware of
+
+`isAdmin()` on this branch includes `manager`; on `main` it did not. The
+merge keeps this branch's rule, so **a manager now has full access to
+`main`'s newer screens too** (sales register, loading money, AVM). That
+follows the role decision already recorded above, but it had never applied
+to those screens before.
+

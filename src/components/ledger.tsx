@@ -126,7 +126,11 @@ export function LedgerView({ data }: { data: LedgerData }) {
                             c.format === "money" && v != null && (v as number) < 0 && "text-brand-red"
                           )}
                         >
-                          {i === 0 ? `Day total` : v != null ? fmt(v as number, c) : ""}
+                          {i === 0
+                            ? (data.subtotalLabel ?? "Day total")
+                            : v != null
+                              ? fmt(v as number, c)
+                              : ""}
                         </td>
                       );
                     })}

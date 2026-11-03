@@ -3,7 +3,8 @@
 --     --to-schema-datamodel prisma/schema.prisma --script
 --
 -- REVIEWED: entirely additive. 0 DROP, 0 TRUNCATE, 0 DELETE statements.
---   1 Settings column, 6 Task columns, 3 new tables, 7 indexes, 7 foreign keys.
+--   1 Settings column, 6 Task columns, 3 new tables, 7 indexes, 7 foreign keys,
+--   and 1 column DEFAULT change appended at the bottom by the `main` merge.
 -- Nothing here rewrites or removes an existing column, so no existing row is
 -- touched. Verified against a snapshot of the live database taken first:
 --   65 tables / 590 columns, 864 leads, 121 cash entries, 46 client payments.
@@ -105,4 +106,24 @@ ALTER TABLE "TaskAttachment" ADD CONSTRAINT "TaskAttachment_taskId_fkey" FOREIGN
 
 -- AddForeignKey
 ALTER TABLE "TaskAttachment" ADD CONSTRAINT "TaskAttachment_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- ─── Appended 2026-11-03 after merging origin/main ───────────────────
+--
+-- main's `5306e06` ("3-state statuses") moved Order.status from
+-- open|partial|complete to upcoming|active|completed and changed the column
+-- DEFAULT to match. The merged code queries the new vocabulary, so the
+-- default has to move with it.
+--
+-- Generated WITHOUT touching the live database — a file-to-file diff of this
+-- branch's schema against the merged one:
+--   npx prisma migrate diff --from-schema-datamodel <pre-merge schema> \
+--     --to-schema-datamodel prisma/schema.prisma --script
+--
+-- Still not destructive: a DEFAULT applies to rows inserted AFTER it. No
+-- existing row is read or rewritten, and rows holding the old spellings keep
+-- them — which is exactly why src/lib/order-status.ts reads both vocabularies
+-- (see build-docs/features/order-status.md).
+
+-- AlterTable
+ALTER TABLE "Order" ALTER COLUMN "status" SET DEFAULT 'active';
 

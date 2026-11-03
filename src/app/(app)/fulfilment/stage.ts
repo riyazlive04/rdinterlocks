@@ -1,4 +1,5 @@
 // The supervisor's stage vocabulary, in one place.
+import { isOrderOpen } from "@/lib/order-status";
 //
 // `Order.fulfilmentStage` is deliberately NOT `Order.status`: that one is
 // driven by delivery progress (open -> partial -> complete) and is not the
@@ -102,7 +103,7 @@ export function decideStageChange(
   if (!subject.approvedAt) {
     return { allowed: false, reason: "This order's payment has not been approved yet" };
   }
-  if (subject.status === "cancelled" || subject.status === "complete") {
+  if (!isOrderOpen(subject.status)) {
     return { allowed: false, reason: `This order is ${subject.status} — its stage is fixed` };
   }
 

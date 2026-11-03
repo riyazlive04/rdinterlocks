@@ -57,6 +57,7 @@ All figures below are from a real run against a throwaway Postgres on
 |---|---|---|
 | `run-nav.ts` | Navigation grouping (phase 6) | **50/50** |
 | `run-offline.ts` | Lead normalisation, webhook signing, pure logic | **128/128** |
+| `run-order-status.ts` | One order-status vocabulary after the `main` merge | **35/35** |
 | `run-pricing.ts` | The rate chart, transcribed twice and compared | **226/226** |
 | `run-rbac.ts` | RBAC, duty, payment gate, security fixes | **52/52** |
 | `run-actions.ts` | Stage transitions, task delegation, priority & progress, password rule | **229/229** |
@@ -67,11 +68,36 @@ All figures below are from a real run against a throwaway Postgres on
 | `run-permissions.ts` | Area grouping, grant writes, who may administer whom | **79/79** |
 | `run-db.ts` | Quotation pricing/numbering, the real order-to-cash spine, WhatsApp gates, Meta ingestion | **121/121** |
 | `run-pdf.ts` | PDF render, pagination, XSS escaping, Tamil shaping | **18/18** |
-| `probe-routes.mjs` | All 64 routes, authenticated as owner | all 200 |
+| `probe-routes.mjs` | All 60 routes, authenticated as owner (now incl. `/avm`, `/clients/register`) | all 200 |
 | `npm run build` | Production build | clean |
 
-**1,219 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
-all pre-existing unused imports.
+**1,254 assertions, 0 failures** (`npm test` exit 0). Typecheck clean.
+Lint: 0 errors, 17 warnings, all pre-existing unused imports.
+
+### After merging `main` (2026-11-03)
+
+The merge of `origin/main` conflicted in 23 files. Re-verified afterwards:
+
+- `npm test` — **1,254/1,254**, exit 0.
+- `prisma db push` against the throwaway database — the merged schema
+  applies cleanly; `prisma validate` passes.
+- `probe-routes.mjs` — all 60 routes return 200 as the owner, including
+  the two routes `main` added.
+
+**The merge's one real bug was invisible to the suites.** Both branches
+defined `Order.status` differently and every assertion still passed,
+because each suite seeds its own vocabulary and never meets the other's.
+The owner's "Pending orders" panel rendered empty with no error. Found by
+diffing the merged schema against each side and reading what the literals
+actually matched — not by a test. `run-order-status.ts` exists so the next
+one fails loudly; see `features/order-status.md`.
+
+Two test expectations were updated rather than the code, both because a
+route legitimately joined a group the test enumerated:
+`NAV-04` now expects `register` under Sell and `avm` under Move, which is
+what the rule recorded in that very test requires — a supervisor holds
+`sales` and `tipper`, so hiding those links would leave pages they can
+open with no way to reach them.
 
 ### Notable cases
 

@@ -20,6 +20,7 @@
 // cash makes an unpaid client look settled (see MEMORY).
 
 import { prisma } from "./db";
+import { isOrderOpen } from "./order-status";
 
 /** Money is stored as float; round at every boundary or the noise compounds. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -268,7 +269,7 @@ export async function outstandingByClient(
       location: c.location,
       phone: c.phone,
       orderCount: mine.length,
-      openOrders: mine.filter((o) => o.status !== "complete").length,
+      openOrders: mine.filter((o) => isOrderOpen(o.status)).length,
     });
   }
   return out;

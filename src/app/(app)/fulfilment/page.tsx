@@ -7,6 +7,7 @@ import { Card, EmptyState, PageHeader, Pill, StatCard } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { formatINR, formatNumber, formatShortDate } from "@/lib/format";
 import { allocateReadyStock, type AllocatableOrder } from "@/lib/allocation";
+import { CLOSED_ORDER_STATUSES } from "@/lib/order-status";
 import { setOrderFulfilmentStage } from "./actions";
 import { StageControl } from "./stage-control";
 import {
@@ -47,7 +48,7 @@ export default async function FulfilmentPage() {
       where: {
         // "Payment approved" is the entry condition for the queue.
         approvedAt: { not: null },
-        status: { notIn: ["complete", "cancelled"] },
+        status: { notIn: [...CLOSED_ORDER_STATUSES] },
       },
       // Oldest-waiting first, globally — so within every stage group below,
       // the order that has sat longest is the first one the eye lands on.
@@ -264,7 +265,7 @@ export default async function FulfilmentPage() {
                                 </Link>
                                 <Pill tone={STAGE_TONE[stage]}>{STAGE_LABEL[stage]}</Pill>
                                 <Pill tone="slate">Waiting {waitingLabel(o.stageChangedAt)}</Pill>
-                                {o.status === "partial" && <Pill tone="info">Part delivered</Pill>}
+                                {o.deliveries.length > 0 && <Pill tone="info">Part delivered</Pill>}
                               </div>
                               <div className="text-[12px] text-slate-500 truncate mt-0.5">
                                 {o.client.location || "Location not captured"}

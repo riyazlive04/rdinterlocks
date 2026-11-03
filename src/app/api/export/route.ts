@@ -72,6 +72,7 @@ export async function GET(req: NextRequest) {
     tipperId: sp.get("tipperId") ?? undefined,
     personId: sp.get("personId") ?? undefined,
     includeRevenue: can(session, "revenue"),
+    period: sp.get("period") === "week" ? "week" : "month",
   });
 
   const settings = await prisma.settings.findUnique({ where: { id: "default" } });

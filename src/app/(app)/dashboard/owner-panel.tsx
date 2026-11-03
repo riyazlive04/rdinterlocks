@@ -15,6 +15,7 @@ import { stageForAge } from "@/lib/stock";
 import { can } from "@/lib/access";
 import { roleLabel } from "@/lib/roles";
 import { collectionsQueue } from "@/lib/outstanding";
+import { CLOSED_ORDER_STATUSES, OPEN_ORDER_STATUSES } from "@/lib/order-status";
 
 /**
  * The whole-business dashboard — Owner and Manager share it.
@@ -72,7 +73,7 @@ export default async function OwnerPanel({ session }: { session: Session }) {
     }),
     prisma.cashEntry.findMany(),
     prisma.order.findMany({
-      where: { status: { in: ["open", "partial"] } },
+      where: { status: { in: [...OPEN_ORDER_STATUSES] } },
       include: {
         client: true,
         items: true,
@@ -96,7 +97,7 @@ export default async function OwnerPanel({ session }: { session: Session }) {
     }),
     prisma.order.findMany({
       where: {
-        status: { in: ["open", "partial"] },
+        status: { in: [...OPEN_ORDER_STATUSES] },
         expectedDeliveryDate: { lt: today },
       },
       include: { client: true },
@@ -133,7 +134,7 @@ export default async function OwnerPanel({ session }: { session: Session }) {
     prisma.order.count({
       where: {
         approvedAt: { not: null },
-        status: { notIn: ["complete", "cancelled"] },
+        status: { notIn: [...CLOSED_ORDER_STATUSES] },
         fulfilmentStage: "queued",
       },
     }),

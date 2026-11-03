@@ -15,6 +15,7 @@ import {
   type FulfilmentStage,
 } from "../fulfilment/stage";
 import { unallocatedStock, type AllocatableOrder } from "@/lib/allocation";
+import { CLOSED_ORDER_STATUSES } from "@/lib/order-status";
 
 const QUEUE_PREVIEW = 60;
 const PER_STAGE_PREVIEW = 3;
@@ -42,7 +43,7 @@ export default async function SupervisorPanel({ session }: { session: Session })
       // Same entry condition as /fulfilment: payment approved, still live.
       where: {
         approvedAt: { not: null },
-        status: { notIn: ["complete", "cancelled"] },
+        status: { notIn: [...CLOSED_ORDER_STATUSES] },
       },
       // Oldest-waiting first, so the head of each stage column below is the
       // order that has been sitting longest.
@@ -94,7 +95,7 @@ export default async function SupervisorPanel({ session }: { session: Session })
   // `take: QUEUE_PREVIEW`, and allocating against a truncated queue would
   // under-count what is committed and overstate what is free.
   const liveQueue = await prisma.order.findMany({
-    where: { approvedAt: { not: null }, status: { notIn: ["complete", "cancelled"] } },
+    where: { approvedAt: { not: null }, status: { notIn: [...CLOSED_ORDER_STATUSES] } },
     select: {
       id: true,
       stageChangedAt: true,
