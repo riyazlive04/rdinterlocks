@@ -130,6 +130,17 @@ start of every session. Update whenever a decision is made.
 ## Known issues
 
 - 16 ESLint warnings, all pre-existing unused imports.
+- **The live schema push is PREPARED AND REVIEWED but NOT APPLIED.** The
+  exact SQL is committed at
+  `prisma/pending/2026-11-03-task-extensions-and-stock-flag.sql`: entirely
+  additive, 0 DROP/TRUNCATE/DELETE. A before-snapshot of the live database
+  was taken (`scripts/db-snapshot.ts`) — 65 tables, 590 columns, 864 leads,
+  121 cash entries, 46 client payments. `npx prisma db push` was **blocked by
+  the sandbox's production-deploy guard**, not by a problem with the change.
+  It needs the user to run it or to grant the permission.
+- **Production zones are still the OLD rate chart.** The 2026-11-03 seed is
+  idempotent and non-destructive: 6 updates, 2 renames, 1 new Karnataka band.
+  Until it runs, Dindigul quotes at the 110-160 km rate (₹3-6/brick under).
 - **The task extension schema is on the throwaway test database only** —
   `TaskChecklistItem`, `TaskComment`, `TaskAttachment`, plus `Task.category`,
   `recurrence`, `recurrenceSpawnedAt`, `recurrenceParentId`. All additive
