@@ -91,3 +91,21 @@ owner escalation, secret logging, and the task hierarchy.
   `db:prices`, `db:quote-settings`.
 - `scripts/post-lead-webhook.mjs` (reference signer), `run-tick.mjs`,
   `run-sweep.mjs` (scheduler-agnostic invokers for VPS/Task Scheduler).
+
+### Navigation grouped by role — phase 6
+33 flat entries over 79 routes, with nothing to tell a new telecaller which
+three were theirs. The sidebar and the mobile "More" sheet now group into
+Sell / Make / Move / Money / Admin, and a group a role has no business in is
+absent entirely — heading and all.
+
+- `groupedNav` is a VIEW over `visibleNav`, never a second filter, so grouping
+  cannot grant or withhold a route. `run-nav.ts` NAV-01 asserts set equality
+  between flat and grouped output for all six roles, which is what makes the
+  change safe.
+- A telecaller's sidebar: 6 entries under one heading, down from 29.
+- The plan's acceptance said a supervisor sees "only Make and Move". That was
+  wrong — `sales` is in their default areas, so hiding it would have been an
+  access change and left a page they can open with no link to it. Recorded in
+  the feature doc and pinned by NAV-04.
+- An item filed under no group falls to the footer rather than vanishing;
+  NAV-07 asserts nothing is actually unfiled.

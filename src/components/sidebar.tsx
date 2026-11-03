@@ -4,16 +4,36 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Icon } from "./icons";
-import { isNavActive, type NavItem } from "./nav-config";
+import { isNavActive, type GroupedNav, type NavItem } from "./nav-config";
+
+function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  const Ic = Icon[item.icon];
+  return (
+    <Link
+      href={item.href}
+      aria-current={active ? "page" : undefined}
+      className={clsx(
+        "flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] transition-colors",
+        active
+          ? "bg-ink text-white font-semibold"
+          : "text-slate-700 font-medium hover:bg-slate-100"
+      )}
+    >
+      <Ic size={17} color={active ? "#fff" : "#475569"} stroke={active ? 2 : 1.6} />
+      <span className="flex-1">{item.label}</span>
+      {active && <span className="w-1.5 h-1.5 rounded-full bg-brand-red" />}
+    </Link>
+  );
+}
 
 export function Sidebar({
   userName,
   role,
-  items,
+  nav,
 }: {
   userName: string;
   role: string;
-  items: NavItem[];
+  nav: GroupedNav;
 }) {
   const pathname = usePathname();
   return (
@@ -35,33 +55,38 @@ export function Sidebar({
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-0.5">
-        {items.map((it) => {
-          const Ic = Icon[it.icon];
-          const active = isNavActive(it, pathname);
-          return (
-            <Link
-              key={it.id}
-              href={it.href}
-              className={clsx(
-                "flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] transition-colors",
-                active
-                  ? "bg-ink text-white font-semibold"
-                  : "text-slate-700 font-medium hover:bg-slate-100"
-              )}
+      <nav aria-label="Main" className="flex-1 overflow-y-auto px-2.5 py-3">
+        <div className="space-y-0.5">
+          {nav.pinned.map((it) => (
+            <NavLink key={it.id} item={it} active={isNavActive(it, pathname)} />
+          ))}
+        </div>
+
+        {/* A group a role has no business in is absent entirely — heading and
+            all — rather than rendered empty. */}
+        {nav.groups.map((g) => (
+          <section key={g.key} aria-labelledby={`nav-${g.key}`} className="mt-4">
+            <h2
+              id={`nav-${g.key}`}
+              className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-3 mb-1"
             >
-              <Ic
-                size={17}
-                color={active ? "#fff" : "#475569"}
-                stroke={active ? 2 : 1.6}
-              />
-              <span className="flex-1">{it.label}</span>
-              {active && (
-                <span className="w-1.5 h-1.5 rounded-full bg-brand-red" />
-              )}
-            </Link>
-          );
-        })}
+              {g.label}
+            </h2>
+            <div className="space-y-0.5">
+              {g.items.map((it) => (
+                <NavLink key={it.id} item={it} active={isNavActive(it, pathname)} />
+              ))}
+            </div>
+          </section>
+        ))}
+
+        {nav.footer.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-slate-100 space-y-0.5">
+            {nav.footer.map((it) => (
+              <NavLink key={it.id} item={it} active={isNavActive(it, pathname)} />
+            ))}
+          </div>
+        )}
       </nav>
 
       <div className="px-3 py-3 border-t border-slate-100">

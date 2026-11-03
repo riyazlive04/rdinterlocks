@@ -2,6 +2,11 @@ import { SignJWT } from "jose";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+// Port is a parameter, not a constant: the suites run against a throwaway
+// database on a second port so a probe can never be pointed at the desk's
+// own dev server by accident. Defaults to the usual one.
+const BASE = process.env.PROBE_BASE_URL ?? "http://localhost:3000";
 const owner = await prisma.user.findFirst({ where: { role: "admin" } });
 if (!owner) throw new Error("No admin user — run npm run db:seed");
 
@@ -81,7 +86,7 @@ const routes = [
 
 let failures = 0;
 for (const path of routes) {
-  const res = await fetch(`http://localhost:3000${path}`, {
+  const res = await fetch(`${BASE}${path}`, {
     headers: { cookie },
     redirect: "manual",
   });

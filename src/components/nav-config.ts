@@ -1,6 +1,25 @@
 import { IconName } from "./icons";
 import { can, isAdmin, type AccessUser } from "@/lib/access";
 
+/**
+ * The five groups the navigation is arranged into, in order.
+ *
+ * They follow the order-to-cash spine the app is built around — sell it, make
+ * it, move it, bank it — with everything that administers the place rather
+ * than running it at the end. The point is that a role with no business in a
+ * group never sees its heading: a telecaller meets seven entries under one
+ * heading instead of twenty-nine under none.
+ */
+export const NAV_GROUPS = [
+  { key: "sell", label: "Sell" },
+  { key: "make", label: "Make" },
+  { key: "move", label: "Move" },
+  { key: "money", label: "Money" },
+  { key: "admin", label: "Admin" },
+] as const;
+
+export type NavGroupKey = (typeof NAV_GROUPS)[number]["key"];
+
 export type NavItem = {
   id: string;
   label: string;
@@ -11,7 +30,22 @@ export type NavItem = {
   adminOnly?: boolean;
   // Owner/admin OR manager. Used by the archive console, which both run.
   adminOrManager?: boolean;
+  /**
+   * Which group the item is filed under. An item with no group is not hidden
+   * — it renders in the unheaded footer below the groups, so forgetting this
+   * field misplaces an entry rather than losing a route.
+   */
+  group?: NavGroupKey;
 };
+
+/**
+ * Items that sit above the groups with no heading of their own.
+ *
+ * The dashboard and the task list are not part of any one stretch of the
+ * spine — every role lands on them — so filing them under a heading would
+ * make them look like someone else's work.
+ */
+const PINNED_IDS = new Set(["home", "tasks"]);
 
 export const primaryNav: NavItem[] = [
   { id: "home", label: "Dashboard", href: "/", icon: "Home" },
@@ -22,6 +56,7 @@ export const primaryNav: NavItem[] = [
     href: "/production",
     icon: "Brick",
     matches: ["/production"],
+    group: "make",
   },
   {
     id: "day",
@@ -29,6 +64,7 @@ export const primaryNav: NavItem[] = [
     href: "/day",
     icon: "Calendar",
     matches: ["/day"],
+    group: "make",
   },
   {
     id: "leads",
@@ -36,6 +72,7 @@ export const primaryNav: NavItem[] = [
     href: "/leads",
     icon: "Mic",
     matches: ["/leads"],
+    group: "sell",
   },
   {
     id: "sales",
@@ -43,6 +80,7 @@ export const primaryNav: NavItem[] = [
     href: "/clients",
     icon: "Receipt",
     matches: ["/clients"],
+    group: "sell",
   },
   {
     id: "deliveries",
@@ -50,6 +88,7 @@ export const primaryNav: NavItem[] = [
     href: "/deliveries",
     icon: "Stack",
     matches: ["/deliveries"],
+    group: "move",
   },
   {
     id: "tipper",
@@ -57,14 +96,23 @@ export const primaryNav: NavItem[] = [
     href: "/tipper",
     icon: "Truck",
     matches: ["/tipper"],
+    group: "move",
   },
-  { id: "mason", label: "Mason", href: "/mason", icon: "Hammer", matches: ["/mason"] },
+  {
+    id: "mason",
+    label: "Mason",
+    href: "/mason",
+    icon: "Hammer",
+    matches: ["/mason"],
+    group: "make",
+  },
   {
     id: "loading",
     label: "Loading",
     href: "/loading",
     icon: "Box",
     matches: ["/loading"],
+    group: "make",
   },
   {
     id: "expense",
@@ -72,6 +120,7 @@ export const primaryNav: NavItem[] = [
     href: "/expense",
     icon: "Tag",
     matches: ["/expense"],
+    group: "money",
   },
   {
     id: "employees",
@@ -79,6 +128,7 @@ export const primaryNav: NavItem[] = [
     href: "/employees",
     icon: "Users",
     matches: ["/employees"],
+    group: "admin",
   },
   {
     id: "leave",
@@ -86,6 +136,7 @@ export const primaryNav: NavItem[] = [
     href: "/leave",
     icon: "Calendar",
     matches: ["/leave"],
+    group: "admin",
   },
   {
     id: "payroll",
@@ -93,14 +144,23 @@ export const primaryNav: NavItem[] = [
     href: "/payroll",
     icon: "Workers",
     matches: ["/payroll"],
+    group: "admin",
   },
-  { id: "cash", label: "Cashbook", href: "/cash", icon: "Cash", matches: ["/cash"] },
+  {
+    id: "cash",
+    label: "Cashbook",
+    href: "/cash",
+    icon: "Cash",
+    matches: ["/cash"],
+    group: "money",
+  },
   {
     id: "reports",
     label: "Reports",
     href: "/reports",
     icon: "Chart",
     matches: ["/reports"],
+    group: "money",
   },
   {
     id: "vehicles",
@@ -108,6 +168,7 @@ export const primaryNav: NavItem[] = [
     href: "/vehicles",
     icon: "Truck",
     matches: ["/vehicles"],
+    group: "move",
   },
   {
     id: "quotations",
@@ -115,6 +176,7 @@ export const primaryNav: NavItem[] = [
     href: "/quotations",
     icon: "FileText",
     matches: ["/quotations"],
+    group: "sell",
   },
   {
     id: "duty",
@@ -123,6 +185,7 @@ export const primaryNav: NavItem[] = [
     icon: "Clock",
     matches: ["/duty"],
     area: "leads",
+    group: "sell",
   },
   {
     id: "payments",
@@ -134,6 +197,7 @@ export const primaryNav: NavItem[] = [
     // page enforces isFullAccess, and adminOrManager keeps the nav honest
     // about that rather than showing a link that redirects.
     adminOrManager: true,
+    group: "money",
   },
   {
     id: "fulfilment",
@@ -142,6 +206,7 @@ export const primaryNav: NavItem[] = [
     icon: "Truck",
     matches: ["/fulfilment"],
     area: "production",
+    group: "make",
   },
   {
     id: "quote-review",
@@ -150,6 +215,7 @@ export const primaryNav: NavItem[] = [
     icon: "Check",
     matches: ["/quotations/review"],
     area: "quoteReview",
+    group: "sell",
   },
   {
     id: "quote-send",
@@ -158,6 +224,7 @@ export const primaryNav: NavItem[] = [
     icon: "Chat",
     matches: ["/quotations/send"],
     area: "quoteSend",
+    group: "sell",
   },
   {
     id: "lead-intake",
@@ -166,6 +233,7 @@ export const primaryNav: NavItem[] = [
     icon: "Download",
     matches: ["/leads/intake"],
     area: "leadIntake",
+    group: "sell",
   },
   {
     id: "whatsapp",
@@ -173,6 +241,7 @@ export const primaryNav: NavItem[] = [
     href: "/whatsapp",
     icon: "Chat",
     matches: ["/whatsapp"],
+    group: "sell",
   },
   {
     id: "guide",
@@ -188,6 +257,7 @@ export const primaryNav: NavItem[] = [
     icon: "Download",
     matches: ["/archive"],
     adminOrManager: true,
+    group: "admin",
   },
   {
     id: "settings",
@@ -195,6 +265,7 @@ export const primaryNav: NavItem[] = [
     href: "/settings",
     icon: "Settings",
     matches: ["/settings"],
+    group: "admin",
   },
 ];
 
@@ -225,4 +296,50 @@ export function visibleNav(items: NavItem[], user: AccessUser): NavItem[] {
     if (ALWAYS_VISIBLE.has(it.id)) return true;
     return can(user, it.area ?? it.id);
   });
+}
+
+export type NavSection = { key: NavGroupKey; label: string; items: NavItem[] };
+
+export type GroupedNav = {
+  /** Above the groups, no heading. */
+  pinned: NavItem[];
+  /** Only groups with at least one visible item. */
+  groups: NavSection[];
+  /** Below the groups, no heading. Also catches any item filed nowhere. */
+  footer: NavItem[];
+};
+
+/**
+ * Arrange the navigation into its groups.
+ *
+ * This is a VIEW OVER `visibleNav`, never a second filter — it calls it and
+ * partitions the result, so grouping cannot grant or withhold anything. That
+ * is the whole safety property of the feature: whatever a role could reach
+ * before it reaches after, and `visibleNav` keeps sole authority over
+ * visibility. An empty group is dropped rather than rendered with a heading
+ * and nothing under it.
+ */
+export function groupedNav(items: NavItem[], user: AccessUser): GroupedNav {
+  const visible = visibleNav(items, user);
+  const pinned: NavItem[] = [];
+  const footer: NavItem[] = [];
+  const buckets = new Map<NavGroupKey, NavItem[]>(NAV_GROUPS.map((g) => [g.key, []]));
+
+  for (const it of visible) {
+    if (PINNED_IDS.has(it.id)) pinned.push(it);
+    // An unfiled item falls through to the footer rather than being dropped:
+    // the wrong place is recoverable, a missing route is not.
+    else if (it.group) buckets.get(it.group)!.push(it);
+    else footer.push(it);
+  }
+
+  return {
+    pinned,
+    groups: NAV_GROUPS.filter((g) => buckets.get(g.key)!.length > 0).map((g) => ({
+      key: g.key,
+      label: g.label,
+      items: buckets.get(g.key)!,
+    })),
+    footer,
+  };
 }
