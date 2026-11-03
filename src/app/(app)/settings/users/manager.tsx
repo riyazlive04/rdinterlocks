@@ -32,14 +32,17 @@ function roleOptionLabel(r: Role): string {
   return label.toLowerCase() === r ? label : `${label} (${r})`;
 }
 
+type AreaGroup = { key: string; label: string; areas: Area[] };
+
 export function UsersManager({
-  areas,
+  areaGroups,
   users,
   onCreate,
   onUpdate,
   onDelete,
 }: {
-  areas: Area[];
+  /** Areas in their five groups — the same vocabulary the sidebar uses. */
+  areaGroups: AreaGroup[];
   users: User[];
   onCreate: (d: CreateData) => Promise<void>;
   onUpdate: (id: string, d: UpdateData) => Promise<void>;
@@ -158,6 +161,8 @@ export function UsersManager({
 
   // What the current role's defaults would add or remove, so the owner can
   // see what the button does before pressing it.
+  // Flat view, only for naming areas in the defaults hint below.
+  const areas = areaGroups.flatMap((g) => g.areas);
   const suggested = defaultsFor(role);
   const defaultsDiffer =
     suggested.length > 0 &&
@@ -239,29 +244,67 @@ export function UsersManager({
             </div>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-            {areas.map((a) => {
-              const on = perms.has(a.key);
+          {/* Grouped, not a flat wall of 22. Same reasoning as the sidebar
+              in phase 6, and this is the screen where a mis-click hands
+              somebody the payroll. */}
+          <div className="space-y-3">
+            {areaGroups.map((g) => {
+              const onCount = g.areas.filter((a) => perms.has(a.key)).length;
               return (
-                <button
-                  key={a.key}
-                  type="button"
-                  onClick={() => togglePerm(a.key)}
-                  className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[12px] border transition ${
-                    on
-                      ? "bg-brand-redLight border-brand-red/40 text-ink font-semibold"
-                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"
-                  }`}
-                >
-                  <span
-                    className={`w-4 h-4 rounded flex items-center justify-center ${
-                      on ? "bg-brand-red text-white" : "bg-slate-100"
-                    }`}
-                  >
-                    {on && <Icon.Check size={11} stroke={2.6} />}
-                  </span>
-                  {a.label}
-                </button>
+                <div key={g.key}>
+                  <div className="flex items-baseline justify-between mb-1.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      {g.label}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // All-or-nothing for the group: the common case is
+                        // "this person does the money side" rather than four
+                        // separate clicks.
+                        const all = onCount === g.areas.length;
+                        setPerms((s) => {
+                          const n = new Set(s);
+                          for (const a of g.areas) {
+                            if (all) n.delete(a.key);
+                            else n.add(a.key);
+                          }
+                          return n;
+                        });
+                      }}
+                      className="text-[11px] font-semibold text-brand-blue hover:underline"
+                    >
+                      {onCount === g.areas.length ? "none" : "all"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {g.areas.map((a) => {
+                      const on = perms.has(a.key);
+                      return (
+                        <button
+                          key={a.key}
+                          type="button"
+                          onClick={() => togglePerm(a.key)}
+                          aria-pressed={on}
+                          className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[12px] border transition ${
+                            on
+                              ? "bg-brand-redLight border-brand-red/40 text-ink font-semibold"
+                              : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"
+                          }`}
+                        >
+                          <span
+                            className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 ${
+                              on ? "bg-brand-red text-white" : "bg-slate-100"
+                            }`}
+                          >
+                            {on && <Icon.Check size={11} stroke={2.6} />}
+                          </span>
+                          {a.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </div>

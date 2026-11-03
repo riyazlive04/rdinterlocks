@@ -282,3 +282,43 @@ Tests: scripts/e2e/run-die.ts, 46/46, including the money unwind (DIE-07
 asserts no stranded `CashEntry`, the production incident in MEMORY) and the
 three authorization gates. Verified over HTTP: manager sees the page with the
 delete control, supervisor sees it without, telecaller is redirected.
+
+### Permission center — phase 11
+One screen showing every login against every area, with each cell a toggle.
+
+**What already existed and was NOT rebuilt:** Settings → Users & access
+already created logins, set roles, disabled accounts and granted areas one
+checkbox at a time. Both owner and manager can use it; only an owner can
+grant owner rank or edit an owner. That editor is unchanged in behaviour.
+
+**What was missing:** it edits one user at a time, so the question people
+actually ask — *who can see the cashbook?* — meant opening every login in turn
+and remembering. Now it is one column.
+
+- `/settings/permissions` — users down the side, 22 areas across the top,
+  grouped Sell / Make / Move / Money / Admin so the columns read in the same
+  order as the menu the grant controls. Optimistic toggles that roll back and
+  show the reason if the server refuses.
+- **Areas now carry a group.** `PERM-01` asserts every area is in exactly one
+  group and that no group names a non-existent area — an ungrouped area would
+  simply not render and would look identical to a revoked grant.
+- **The per-user editor is grouped too**, with an all/none shortcut per group,
+  since "this person does the money side" was four separate clicks.
+- `setUserArea` is one narrow action rather than a reuse of `updateUser`.
+  `updateUser` takes name, role, permissions and active together, so driving a
+  single checkbox through it means the browser sends the whole user back — a
+  stale tab could revert a rename or re-enable a login somebody just disabled.
+- Refusals: not a real area key, a subject who is an owner when you are not,
+  a full-access subject (no per-area grants are stored for them), and
+  yourself. The rules moved to `lib/roles.ts` as pure predicates
+  (`canAdministerUser`, `canConferRole`, `canSetUserAreas`); the existing
+  asserts in `settings/actions.ts` now delegate to them, so the screen and the
+  action cannot drift. Rows the signed-in user may not change render disabled
+  with the reason, rather than being offered and then refused.
+
+Tests: scripts/e2e/run-permissions.ts, 79/79. Verified over HTTP with real
+sessions: owner and manager get the grid, a manager sees the owner's row
+locked, a telecaller is redirected, the manager row shows "everything" rather
+than 22 checkboxes, and all five group headers render.
+
+**npm test: 754 assertions, 0 failures, exit 0.**

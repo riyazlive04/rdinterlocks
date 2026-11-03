@@ -3,36 +3,82 @@
 // `permissions` list. "revenue" is special — it gates money totals
 // (dashboard cash/profit, reports revenue, cashbook) rather than a page.
 export const ACCESS_AREAS = [
-  { key: "production", label: "Production" },
-  { key: "die", label: "Dies (moulds)" },
-  { key: "day", label: "Daily entry" },
-  { key: "leads", label: "Leads (call enquiries)" },
-  { key: "sales", label: "Clients & Sales" },
-  { key: "deliveries", label: "Deliveries" },
-  { key: "tipper", label: "Tipper" },
-  { key: "mason", label: "Mason work" },
-  { key: "loading", label: "Loading work" },
-  { key: "expense", label: "Expense" },
-  { key: "employees", label: "Employees" },
-  { key: "leave", label: "Leave marking" },
-  { key: "payroll", label: "Payroll" },
-  { key: "cash", label: "Cashbook" },
-  { key: "reports", label: "Reports" },
-  { key: "vehicles", label: "Vehicles & EMI" },
-  { key: "whatsapp", label: "WhatsApp nurturing" },
-  { key: "quotations", label: "Quotations" },
+  { key: "production", label: "Production", group: "make" },
+  { key: "die", label: "Dies (moulds)", group: "make" },
+  { key: "day", label: "Daily entry", group: "make" },
+  { key: "leads", label: "Leads (call enquiries)", group: "sell" },
+  { key: "sales", label: "Clients & Sales", group: "sell" },
+  { key: "deliveries", label: "Deliveries", group: "move" },
+  { key: "tipper", label: "Tipper", group: "move" },
+  { key: "mason", label: "Mason work", group: "make" },
+  { key: "loading", label: "Loading work", group: "make" },
+  { key: "expense", label: "Expense", group: "money" },
+  { key: "employees", label: "Employees", group: "admin" },
+  { key: "leave", label: "Leave marking", group: "admin" },
+  { key: "payroll", label: "Payroll", group: "admin" },
+  { key: "cash", label: "Cashbook", group: "money" },
+  { key: "reports", label: "Reports", group: "money" },
+  { key: "vehicles", label: "Vehicles & EMI", group: "move" },
+  { key: "whatsapp", label: "WhatsApp nurturing", group: "sell" },
+  { key: "quotations", label: "Quotations", group: "sell" },
   // Split from `quotations` on purpose. Reviewing and sending a quotation
   // move a status and write no amounts, so a telecaller can hold these
   // without `revenue` — the same reasoning that already lets
   // markQuotationSent run without price access while generateQuotation
   // cannot.
-  { key: "quoteReview", label: "Review & approve quotations" },
-  { key: "quoteSend", label: "Send approved quotations" },
-  { key: "leadIntake", label: "Lead intake log & replay" },
-  { key: "revenue", label: "See revenue, profit & cash totals" },
+  { key: "quoteReview", label: "Review & approve quotations", group: "sell" },
+  { key: "quoteSend", label: "Send approved quotations", group: "sell" },
+  { key: "leadIntake", label: "Lead intake log & replay", group: "sell" },
+  { key: "revenue", label: "See revenue, profit & cash totals", group: "money" },
 ] as const;
 
 export type AreaKey = (typeof ACCESS_AREAS)[number]["key"];
+
+/**
+ * The five groups the areas are presented in — the SAME vocabulary the
+ * navigation uses (components/nav-config.ts), so the permission screen reads
+ * in the same order as the menu the grant controls. 22 flat checkboxes in
+ * declaration order is the wall phase 6 removed from the sidebar, and this is
+ * the one place where a mis-click hands somebody the payroll.
+ */
+export const AREA_GROUPS = [
+  { key: "sell", label: "Sell" },
+  { key: "make", label: "Make" },
+  { key: "move", label: "Move" },
+  { key: "money", label: "Money" },
+  { key: "admin", label: "Admin" },
+] as const;
+
+export type AreaGroupKey = (typeof AREA_GROUPS)[number]["key"];
+
+export type AreaGroup = {
+  key: AreaGroupKey;
+  label: string;
+  areas: Array<{ key: string; label: string }>;
+};
+
+/**
+ * Areas arranged into their groups, in group order.
+ *
+ * Every area carries a group, so nothing can fall out of this — an area
+ * missing from a group would simply not render on either permission screen
+ * and would look exactly like a revoked grant. PERM-01 asserts the coverage.
+ */
+export function groupedAreas(): AreaGroup[] {
+  return AREA_GROUPS.map((g) => ({
+    key: g.key,
+    label: g.label,
+    areas: ACCESS_AREAS.filter((a) => a.group === g.key).map((a) => ({
+      key: a.key,
+      label: a.label,
+    })),
+  })).filter((g) => g.areas.length > 0);
+}
+
+/** Is this a real, grantable area? Guards the one action that writes grants. */
+export function isAreaKey(key: string): key is AreaKey {
+  return ACCESS_AREAS.some((a) => a.key === key);
+}
 
 export type AccessUser = { role: string; permissions: string[] };
 

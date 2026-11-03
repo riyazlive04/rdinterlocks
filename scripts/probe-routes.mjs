@@ -60,6 +60,7 @@ const routes = [
   "/settings",
   "/settings/factory",
   "/settings/security",
+  "/settings/permissions",
   "/settings/brick-sizes",
   "/settings/construction-types",
   "/settings/price-matrix",

@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:unit": "tsx scripts/e2e/run-nav.ts && tsx scripts/e2e/run-offline.ts",
-    "test:db": "tsx scripts/e2e/run-rbac.ts && tsx scripts/e2e/run-actions.ts && tsx scripts/e2e/run-collections.ts && tsx scripts/e2e/run-allocation.ts && tsx scripts/e2e/run-die.ts && tsx scripts/e2e/run-db.ts",
+    "test:db": "tsx scripts/e2e/run-rbac.ts && tsx scripts/e2e/run-actions.ts && tsx scripts/e2e/run-collections.ts && tsx scripts/e2e/run-allocation.ts && tsx scripts/e2e/run-die.ts && tsx scripts/e2e/run-permissions.ts && tsx scripts/e2e/run-db.ts",
     "test:pdf": "tsx scripts/e2e/run-pdf.ts",
     "test": "npm run typecheck && npm run lint && npm run test:unit && npm run test:db",
     "test:seed": "node scripts/guard-local-db.mjs && prisma db push --skip-generate && tsx prisma/seed.ts && tsx prisma/seed-delivery-zones.ts --apply && tsx prisma/seed-brick-prices.ts --apply && tsx prisma/seed-quote-settings.ts --apply && tsx prisma/backfill-lead-stages.ts --apply",

@@ -57,16 +57,18 @@ All figures below are from a real run against a throwaway Postgres on
 |---|---|---|
 | `run-nav.ts` | Navigation grouping (phase 6) | **50/50** |
 | `run-offline.ts` | Lead normalisation, webhook signing, pure logic | **128/128** |
-| `run-rbac.ts` | RBAC, duty, payment gate, security fixes | **50/50** |
+| `run-rbac.ts` | RBAC, duty, payment gate, security fixes | **52/52** |
 | `run-actions.ts` | Stage transitions, task delegation, password rule | **154/154** |
 | `run-collections.ts` | Outstanding balance and ageing (phase 7) | **73/73** |
 | `run-allocation.ts` | Godown stock allocation (phase 8) | **51/51** |
+| `run-die.ts` | Die register: lifecycle, money unwind, three gates | **46/46** |
+| `run-permissions.ts` | Area grouping, grant writes, who may administer whom | **79/79** |
 | `run-db.ts` | Quotation pricing/numbering, the real order-to-cash spine, WhatsApp gates, Meta ingestion | **121/121** |
 | `run-pdf.ts` | PDF render, pagination, XSS escaping, Tamil shaping | **18/18** |
-| `probe-routes.mjs` | All 61 routes, authenticated as owner | all 200 |
+| `probe-routes.mjs` | All 63 routes, authenticated as owner | all 200 |
 | `npm run build` | Production build | clean |
 
-**645 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
+**754 assertions, 0 failures.** Typecheck clean. Lint: 0 errors, 16 warnings,
 all pre-existing unused imports.
 
 ### Notable cases
@@ -82,6 +84,9 @@ all pre-existing unused imports.
 | `TASK-05` | The assignee may complete a task but **not** delete it. Same actor, same task, opposite answers — asserted side by side. |
 | `TC-DBQ-06` | Now drives the real spine: sent → payment recorded → manager approves → order. |
 | `PW-01` | The password minimum follows `isFullAccess` for every role, and the owner/manager refusal explains itself rather than reading as arbitrary. |
+| `DIE-07` | Deleting a costed die strands no `CashEntry` — the production incident recorded in MEMORY, now a permanent assertion. |
+| `PERM-01` | Every access area is in exactly one group, and no group names an area that does not exist. An ungrouped area would silently not render and look exactly like a revoked grant. |
+| `PERM-12` | A revoked grant binds on the next read, which is only true because the security review made sessions revocable. Pinned on the screen that makes the promise. |
 
 ### Fixed on this branch
 

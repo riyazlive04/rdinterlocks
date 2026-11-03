@@ -86,6 +86,57 @@ export function canManageTaskOf(actorRole: string, assigneeRole: string): boolea
   return canAssignTo(actorRole, assigneeRole);
 }
 
+// ─── Administering other users ────────────────────────────────────────
+//
+// Access and RANK are different things, and this is where that distinction
+// lives. Manager deliberately carries the same access as owner, so nothing
+// operational is withheld from them — but the role field IS the chain of
+// command, so a manager who could set it could promote themselves out of the
+// hierarchy or demote the owner out of it.
+//
+// Pure, so the rules are testable without a request context. The asserts in
+// settings/actions.ts delegate here rather than restating them.
+
+/** May `actorRole` edit an account that currently holds `subjectRole`? */
+export function canAdministerUser(actorRole: string, subjectRole: string): boolean {
+  // Only an owner may touch another owner. Everyone else with Settings
+  // access (which is owner, admin and manager) may administer the rest.
+  if (isOwner(subjectRole) && !isOwner(actorRole)) return false;
+  return isFullAccess(actorRole);
+}
+
+/** May `actorRole` hand out `targetRole`? Owner rank is owner-only. */
+export function canConferRole(actorRole: string, targetRole: string): boolean {
+  if (isOwner(targetRole) && !isOwner(actorRole)) return false;
+  return isFullAccess(actorRole);
+}
+
+/**
+ * May `actor` change `subject`'s per-area grants?
+ *
+ * Three refusals beyond rank: a full-access subject stores no per-area grants
+ * (isAdmin short-circuits can(), so writing one would be a lie the UI then
+ * has to explain), and nobody edits their own access.
+ */
+export function canSetUserAreas(
+  actor: { userId: string; role: string },
+  subject: { id: string; role: string }
+): Decision {
+  if (subject.id === actor.userId) {
+    return { allowed: false, reason: "You can't change your own access — ask another owner to do it." };
+  }
+  if (!canAdministerUser(actor.role, subject.role)) {
+    return { allowed: false, reason: "Only an owner can change another owner's account." };
+  }
+  if (isFullAccess(subject.role)) {
+    return {
+      allowed: false,
+      reason: `${roleLabel(subject.role)}s already see everything — change their role to restrict them.`,
+    };
+  }
+  return { allowed: true };
+}
+
 // ─── Password strength ────────────────────────────────────────────────
 //
 // The minimum was 4 everywhere, which looked intentional: the column is

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
-import { ACCESS_AREAS } from "@/lib/access";
+import { groupedAreas } from "@/lib/access";
 import { UsersManager } from "./manager";
 import { createUser, updateUser, deleteUser } from "../actions";
 
@@ -21,7 +21,7 @@ export default async function UsersPage() {
         back="/settings"
       />
       <UsersManager
-        areas={ACCESS_AREAS.map((a) => ({ key: a.key, label: a.label }))}
+        areaGroups={groupedAreas()}
         users={users.map((u) => ({
           id: u.id,
           name: u.name,

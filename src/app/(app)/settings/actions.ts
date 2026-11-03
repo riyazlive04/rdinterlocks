@@ -7,7 +7,8 @@ import { prisma } from "@/lib/db";
 import { getSession, requireAdmin } from "@/lib/auth";
 import { triggerWaSequencesForStage } from "@/lib/lead-stage";
 import { isValidVpa } from "@/lib/upi-vpa";
-import { ROLES, isFullAccess, isOwner, passwordProblem } from "@/lib/roles";
+import { isAreaKey } from "@/lib/access";
+import { ROLES, canAdministerUser, canConferRole, canSetUserAreas, isFullAccess, isOwner, passwordProblem } from "@/lib/roles";
 
 // ─── Brick sizes ───────────────────────────────────────────────────────
 
@@ -706,14 +707,17 @@ const userCreateSchema = z.object({
  * it costs managers nothing they could otherwise do.
  */
 function assertMayConferRole(actorRole: string, targetRole: string) {
-  if (isOwner(targetRole) && !isOwner(actorRole)) {
+  // Rule itself lives in lib/roles.ts as canConferRole, so it is testable
+  // without a request context and cannot drift from the permission screen's
+  // own copy of it.
+  if (!canConferRole(actorRole, targetRole)) {
     throw new Error("Only an owner can grant owner rank.");
   }
 }
 
 /** Likewise, only an owner may edit or remove an existing owner. */
 function assertMayAdministerUser(actorRole: string, subjectRole: string) {
-  if (isOwner(subjectRole) && !isOwner(actorRole)) {
+  if (!canAdministerUser(actorRole, subjectRole)) {
     throw new Error("Only an owner can change another owner's account.");
   }
 }
@@ -844,6 +848,58 @@ export async function updateUser(id: string, input: z.infer<typeof userUpdateSch
     data.pinHash = await bcrypt.hash(p.password, 10);
   }
   await prisma.user.update({ where: { id }, data });
+  revalidatePath("/settings/users");
+}
+
+/**
+ * Grant or revoke ONE area for ONE user — the permission center's only write.
+ *
+ * Deliberately not a call into updateUser. That one takes name, role,
+ * permissions and active together, so driving a single checkbox through it
+ * means the browser sends the whole user back: a stale tab would silently
+ * revert a rename done elsewhere, or re-enable a login somebody just
+ * disabled. This touches `permissions` and nothing else, which also means two
+ * owners toggling different areas on the same user cannot clobber each other.
+ *
+ * Every refusal is in canSetUserAreas (lib/roles.ts) except the area-key
+ * check, which belongs here because it is about the payload rather than the
+ * actor: without it any string lands in `permissions`, where it is dead
+ * weight that reads like a real grant on every screen that lists them.
+ */
+export async function setUserArea(userId: string, area: string, granted: boolean) {
+  const session = await requireAdmin();
+
+  if (!isAreaKey(area)) {
+    throw new Error(`"${area}" is not an access area.`);
+  }
+
+  // Re-read the subject: the role that decides this must be the stored one,
+  // never a role that arrived with the request.
+  const subject = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true, permissions: true },
+  });
+  if (!subject) throw new Error("User not found");
+
+  const decision = canSetUserAreas(
+    { userId: session.userId, role: session.role },
+    { id: subject.id, role: subject.role }
+  );
+  if (!decision.allowed) throw new Error(decision.reason);
+
+  // Set semantics: granting twice does not duplicate, revoking something they
+  // never had is a no-op. `permissions` is an unconstrained string array, so
+  // this is enforced here or not at all.
+  const next = new Set(subject.permissions);
+  if (granted) next.add(area);
+  else next.delete(area);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { permissions: [...next] },
+  });
+
+  revalidatePath("/settings/permissions");
   revalidatePath("/settings/users");
 }
 
